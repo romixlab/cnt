@@ -10,6 +10,8 @@ use serde::Deserialize;
 
 pub struct Counters {
     entries: BTreeMap<u64, Counter>,
+    cnt_ram_buffer_addr: Option<u64>,
+    cnt_bkp_buffer_addr: Option<u64>,
 }
 
 pub struct Counter {
@@ -71,10 +73,20 @@ impl Counters {
         let mut raw_symbols = vec![];
         let mut entries = BTreeMap::new();
         let mut dedup_str = vec![];
+        let mut cnt_ram_buffer_addr = None;
+        let mut cnt_bkp_buffer_addr = None;
         for symbol in elf.symbols() {
             let (Ok(symbol_name), Some(section_idx)) = (symbol.name(), symbol.section_index()) else {
                 continue;
             };
+            if symbol_name == "_CNT_RAM_BUFFER" {
+                cnt_ram_buffer_addr = Some(symbol.address());
+                continue;
+            }
+            if symbol_name == "_CNT_BKP_BUFFER" {
+                cnt_bkp_buffer_addr = Some(symbol.address());
+                continue;
+            }
             if section_idx != ram_section_idx {
                 continue;
             }
@@ -118,6 +130,8 @@ impl Counters {
 
         Ok(Self {
             entries,
+            cnt_ram_buffer_addr,
+            cnt_bkp_buffer_addr,
         })
     }
 
