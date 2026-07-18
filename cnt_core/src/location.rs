@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, ensure};
 use gimli::DebuggingInformationEntry;
 use object::{File, Object, ObjectSection};
-use crate::{dedup, Location};
+use crate::load::dedup;
+use crate::Location;
 
-pub(crate) fn get_locations(elf: File, filter_symbols: &[&str]) -> Result<BTreeMap<u64, Location>, anyhow::Error> {
+pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTreeMap<u64, Location>, anyhow::Error> {
     let endian = if elf.is_little_endian() {
         gimli::RunTimeEndian::Little
     } else {
