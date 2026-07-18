@@ -97,20 +97,20 @@ impl Counters {
         })
     }
 
-    pub fn ram_counters(&self) -> &Option<CountersBlock> {
-        &self.ram_counters
+    pub fn ram_counters(&self) -> Option<&CountersBlock> {
+        self.ram_counters.as_ref()
     }
 
-    pub fn bkp_counters(&self) -> &Option<CountersBlock> {
-        &self.bkp_counters
+    pub fn bkp_counters(&self) -> Option<&CountersBlock> {
+        self.bkp_counters.as_ref()
     }
 
-    pub fn ram_counters_mut(&mut self) -> &mut Option<CountersBlock> {
-        &mut self.ram_counters
+    pub fn ram_counters_mut(&mut self) -> Option<&mut CountersBlock> {
+        self.ram_counters.as_mut()
     }
 
-    pub fn bkp_counters_mut(&mut self) -> &mut Option<CountersBlock> {
-        &mut self.bkp_counters
+    pub fn bkp_counters_mut(&mut self) -> Option<&mut CountersBlock> {
+        self.bkp_counters.as_mut()
     }
 }
 

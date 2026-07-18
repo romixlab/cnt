@@ -37,7 +37,9 @@ pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
         Command::Read => {
             read::read(&mut counters)?;
         }
-        Command::Tui => {}
+        Command::Tui => {
+            crate::tui::tui(&mut counters).unwrap();
+        }
     }
     Ok(())
 }

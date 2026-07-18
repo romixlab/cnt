@@ -151,6 +151,13 @@ impl CountersBlock {
             }
         })
     }
+
+    pub fn values_opt(&self) -> impl Iterator<Item = (&Counter, Option<Value>)> {
+        self.entries.iter().map(|(addr, counter)| {
+            let value = self.values.get(addr).cloned();
+            (counter, value)
+        })
+    }
 }
 
 impl Display for Value {
