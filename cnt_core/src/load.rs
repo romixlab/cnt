@@ -1,10 +1,10 @@
+use crate::{Buffer, Counter, Counters, CountersBlock, Location, Severity, Storage, Ty, location};
+use anyhow::anyhow;
+use object::{File, Object, ObjectSection, ObjectSymbol, SectionIndex};
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
-use object::{File, Object, ObjectSection, ObjectSymbol, SectionIndex};
-use anyhow::anyhow;
-use serde::Deserialize;
-use crate::{location, Buffer, Counter, Counters, Location, Severity, Storage, Ty};
 
 impl Counters {
     pub fn load_elf(path: &Path) -> anyhow::Result<Self> {
@@ -13,25 +13,33 @@ impl Counters {
         let ram_section_idx = elf.section_by_name(".counters_ram").map(|s| s.index());
         let bkp_section_idx = elf.section_by_name(".counters_bkp").map(|s| s.index());
         if ram_section_idx.is_none() && bkp_section_idx.is_none() {
-            return Err(anyhow!("No .counters_ram or .counters_bkp section found, cnt crate or cnt.x linker script is not used"));
+            return Err(anyhow!(
+                "No .counters_ram or .counters_bkp section found, cnt crate or cnt.x linker script is not used"
+            ));
         };
 
-        let mut cnt_ram_buffer = None;
-        let mut cnt_bkp_buffer = None;
+        let mut ram_buffer = None;
+        let mut bkp_buffer = None;
         for symbol in elf.symbols() {
             let Ok(symbol_name) = symbol.name() else {
                 continue;
             };
             if symbol_name == "_CNT_RAM_BUFFER" {
-                cnt_ram_buffer = Some(Buffer { addr: symbol.address(), size: symbol.size() });
+                ram_buffer = Some(Buffer {
+                    addr: symbol.address(),
+                    size: symbol.size(),
+                });
                 continue;
             }
             if symbol_name == "_CNT_BKP_BUFFER" {
-                cnt_bkp_buffer = Some(Buffer { addr: symbol.address(), size: symbol.size() });
+                bkp_buffer = Some(Buffer {
+                    addr: symbol.address(),
+                    size: symbol.size(),
+                });
                 continue;
             }
         }
-        
+
         let mut raw_symbols_ram = vec![];
         let mut dedup_str = vec![];
         let mut ram_counters = if let Some(ram_section_idx) = ram_section_idx {
@@ -39,51 +47,79 @@ impl Counters {
         } else {
             BTreeMap::new()
         };
-        if !ram_counters.is_empty() {
+        let ram_counters = if !ram_counters.is_empty() {
             let locations = location::get_locations(&elf, &raw_symbols_ram)?;
             fill_locations(&mut ram_counters, locations);
-            fill_addresses(&mut ram_counters, cnt_ram_buffer, "_CNT_RAM_BUFFER")?;
-        }
-        
+            let Some(ram_buffer) = ram_buffer else {
+                return Err(anyhow!(
+                    "No _CNT_RAM_BUFFER symbol found, cnt crate or cnt.x linker script is not used"
+                ));
+            };
+            fill_addresses(&mut ram_counters, ram_buffer);
+            Some(CountersBlock {
+                entries: ram_counters,
+                buffer: ram_buffer,
+                storage: Storage::RAM,
+                values: Default::default(),
+            })
+        } else {
+            None
+        };
+
         let mut raw_symbols_bkp = vec![];
         let mut bkp_counters = if let Some(bkp_section_idx) = bkp_section_idx {
             collect_counters(&elf, bkp_section_idx, &mut raw_symbols_bkp, &mut dedup_str)
         } else {
             BTreeMap::new()
         };
-        if !bkp_counters.is_empty() {
+        let bkp_counters = if !bkp_counters.is_empty() {
             let locations = location::get_locations(&elf, &raw_symbols_bkp)?;
             fill_locations(&mut bkp_counters, locations);
-            fill_addresses(&mut bkp_counters, cnt_bkp_buffer, "_CNT_BKP_BUFFER")?;
-        }
- 
+            let Some(bkp_buffer) = bkp_buffer else {
+                return Err(anyhow!(
+                    "No _CNT_BKP_BUFFER symbol found, cnt crate or cnt.x linker script is not used"
+                ));
+            };
+            fill_addresses(&mut bkp_counters, bkp_buffer);
+            Some(CountersBlock {
+                entries: bkp_counters,
+                buffer: bkp_buffer,
+                storage: Storage::BKP,
+                values: Default::default(),
+            })
+        } else {
+            None
+        };
 
         Ok(Self {
             ram_counters,
             bkp_counters,
-            cnt_ram_buffer,
-            cnt_bkp_buffer,
         })
     }
 
-    pub fn ram_counters(&self) -> &BTreeMap<u64, Counter> {
+    pub fn ram_counters(&self) -> &Option<CountersBlock> {
         &self.ram_counters
     }
 
-    pub fn bkp_counters(&self) -> &BTreeMap<u64, Counter> {
+    pub fn bkp_counters(&self) -> &Option<CountersBlock> {
         &self.bkp_counters
     }
 
-    pub fn ram_buffer(&self) -> Option<Buffer> {
-        self.cnt_ram_buffer
+    pub fn ram_counters_mut(&mut self) -> &mut Option<CountersBlock> {
+        &mut self.ram_counters
     }
 
-    pub fn bkp_buffer(&self) -> Option<Buffer> {
-        self.cnt_bkp_buffer
+    pub fn bkp_counters_mut(&mut self) -> &mut Option<CountersBlock> {
+        &mut self.bkp_counters
     }
 }
 
-fn collect_counters<'f>(elf: &'f File, filter_section_idx: SectionIndex, raw_symbols: &mut Vec<&'f str>, dedup_str: &mut Vec<Arc<String>>) -> BTreeMap<u64, Counter> {
+fn collect_counters<'f>(
+    elf: &'f File,
+    filter_section_idx: SectionIndex,
+    raw_symbols: &mut Vec<&'f str>,
+    dedup_str: &mut Vec<Arc<String>>,
+) -> BTreeMap<u64, Counter> {
     let mut counters = BTreeMap::new();
     for symbol in elf.symbols() {
         let (Ok(symbol_name), Some(section_idx)) = (symbol.name(), symbol.section_index()) else {
@@ -111,17 +147,20 @@ fn collect_counters<'f>(elf: &'f File, filter_section_idx: SectionIndex, raw_sym
         let group = dedup(dedup_str, symbol.group);
         let package = dedup(dedup_str, symbol.package);
         let crate_name = dedup(dedup_str, symbol.crate_name);
-        counters.insert(symbol_addr, Counter {
-            group,
-            crate_name,
-            package,
-            name: symbol.name,
-            storage: symbol.storage,
-            ty,
-            severity: symbol.severity,
-            location: None,
-            buf: Buffer { addr: 0, size: 0 },
-        });
+        counters.insert(
+            symbol_addr,
+            Counter {
+                group,
+                crate_name,
+                package,
+                name: symbol.name,
+                storage: symbol.storage,
+                ty,
+                severity: symbol.severity,
+                location: None,
+                buf: Buffer { addr: 0, size: 0 },
+            },
+        );
     }
     counters
 }
@@ -134,14 +173,13 @@ fn fill_locations(counters: &mut BTreeMap<u64, Counter>, locations: BTreeMap<u64
     }
 }
 
-fn fill_addresses(counters: &mut BTreeMap<u64, Counter>, buffer: Option<Buffer>, name: &'static str) -> anyhow::Result<()> {
-    let Some(buffer) = buffer else {
-        return Err(anyhow!("No {name} symbol found, cnt crate or cnt.x linker script is not used"));
-    };
+fn fill_addresses(counters: &mut BTreeMap<u64, Counter>, buffer: Buffer) {
     for (idx, counter) in counters.iter_mut() {
-        counter.buf = Buffer { addr: buffer.addr + idx * counter.ty.len() as u64, size: counter.ty.len() as u64 };
+        counter.buf = Buffer {
+            addr: buffer.addr + idx * counter.ty.len() as u64,
+            size: counter.ty.len() as u64,
+        };
     }
-    Ok(())
 }
 
 pub(crate) fn dedup<T: PartialEq>(seen: &mut Vec<Arc<T>>, current: T) -> Arc<T> {

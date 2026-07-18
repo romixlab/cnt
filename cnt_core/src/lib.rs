@@ -1,17 +1,24 @@
-mod location;
 mod load;
+mod location;
 
+use anyhow::anyhow;
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
-use serde::Deserialize;
 
 pub struct Counters {
-    ram_counters: BTreeMap<u64, Counter>,
-    bkp_counters: BTreeMap<u64, Counter>,
-    cnt_ram_buffer: Option<Buffer>,
-    cnt_bkp_buffer: Option<Buffer>,
+    ram_counters: Option<CountersBlock>,
+    bkp_counters: Option<CountersBlock>,
+}
+
+pub struct CountersBlock {
+    entries: BTreeMap<u64, Counter>,
+    buffer: Buffer,
+    storage: Storage,
+    values: BTreeMap<u64, Value>,
 }
 
 pub struct Counter {
@@ -37,7 +44,13 @@ pub enum Storage {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum Ty {
     U32,
-    U64
+    U64,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Value {
+    U32(u32),
+    U64(u64),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize)]
@@ -81,6 +94,69 @@ impl Ty {
         match self {
             Ty::U32 => 4,
             Ty::U64 => 8,
+        }
+    }
+}
+
+impl Counters {
+    pub fn is_empty(&self) -> bool {
+        self.ram_counters.is_none() && self.bkp_counters.is_none()
+    }
+}
+
+impl Display for Storage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Storage::RAM => write!(f, "RAM"),
+            Storage::BKP => write!(f, "BKP"),
+        }
+    }
+}
+
+impl CountersBlock {
+    pub fn entries(&self) -> &BTreeMap<u64, Counter> {
+        &self.entries
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn storage(&self) -> Storage {
+        self.storage
+    }
+
+    pub fn read_values(&mut self, buf: &[u8]) -> anyhow::Result<()> {
+        if buf.len() != self.buffer.size as usize {
+            return Err(anyhow!("Invalid buffer size"));
+        }
+        for (addr, counter) in self.entries.iter() {
+            let idx = *addr as usize;
+            let value = match counter.ty {
+                Ty::U32 => Value::U32(u32::from_le_bytes(buf[idx..idx + 4].try_into()?)),
+                Ty::U64 => Value::U64(u64::from_le_bytes(buf[idx..idx + 8].try_into()?)),
+            };
+            self.values.insert(*addr, value);
+        }
+        Ok(())
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = (&Counter, Value)> {
+        self.values.iter().filter_map(|(addr, value)| {
+            if let Some(counter) = self.entries.get(addr) {
+                Some((counter, *value))
+            } else {
+                None
+            }
+        })
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::U32(v) => write!(f, "{}", v),
+            Value::U64(v) => write!(f, "{}", v),
         }
     }
 }
