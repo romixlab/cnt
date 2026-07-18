@@ -6,6 +6,7 @@ use std::{
 use proc_macro::Span;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
+use crate::symbol::{Severity, Storage, Ty};
 
 pub(crate) fn crate_local_disambiguator() -> u64 {
     // We want a deterministic, but unique-per-macro-invocation identifier. For that we
@@ -19,7 +20,7 @@ pub(crate) fn crate_local_disambiguator() -> u64 {
 ///   under macos: ".acc," + 16 character hex digest of symbol's hash
 ///   otherwise:   ".acc." + prefix + symbol
 pub(crate) fn linker_section(
-    kind: CounterKind,
+    storage: Storage,
     for_macos: bool,
     prefix: Option<&str>,
     symbol: &str,
@@ -34,42 +35,17 @@ pub(crate) fn linker_section(
         sub_section = format!(",{:x}", hash(&sub_section));
     }
 
-    let section = match kind {
-        CounterKind::RAM => "cnt_ram",
-        CounterKind::BKP => "cnt_bkp",
+    let section = match storage {
+        Storage::RAM => "cnt_ram",
+        Storage::BKP => "cnt_bkp",
     };
     format!(".{section}{sub_section}")
 }
 
-#[derive(Copy, Clone)]
-pub enum CounterKind {
-    RAM,
-    BKP,
-}
-
-// impl Into<&str> for CounterKind {
-//     fn into(self) -> &'static str {
-//         match self {
-//             CounterKind::Error => "error",
-//             CounterKind::Warning => "warning",
-//             CounterKind::Info => "info",
-//         }
-//     }
-// }
-
-impl CounterKind {
-    fn tag(&self) -> &'static str {
-        match self {
-            CounterKind::RAM => "cnt_ram",
-            CounterKind::BKP => "cnt_bkp",
-        }
-    }
-}
-
-pub(crate) fn static_variable(counter_kind: CounterKind, data: &str) -> TokenStream2 {
-    let sym_name = crate::symbol::mangled(counter_kind.tag(), data);
-    let section = linker_section(counter_kind, false, None, &sym_name);
-    let section_for_macos = linker_section(counter_kind, true, None, &sym_name);
+pub(crate) fn static_variable(group: &str, storage: Storage, name: &str, ty: Ty, severity: Severity) -> TokenStream2 {
+    let sym_name = crate::symbol::mangled(group, storage, name, ty, severity);
+    let section = linker_section(storage, false, None, &sym_name);
+    let section_for_macos = linker_section(storage, true, None, &sym_name);
 
     quote!({
         #[cfg_attr(target_os = "macos", unsafe(link_section = #section_for_macos))]

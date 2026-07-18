@@ -2,8 +2,8 @@ use std::env;
 // Borrowed from defmt
 use std::fmt::Write;
 
-pub(crate) fn mangled(tag: &str, data: &str) -> String {
-    Symbol::new(tag, data).mangle()
+pub(crate) fn mangled(group: &str, storage: Storage, name: &str, ty: Ty, severity: Severity) -> String {
+    Symbol::new(group, storage, name, ty, severity).mangle()
 }
 
 struct Symbol<'a> {
@@ -11,40 +11,76 @@ struct Symbol<'a> {
     /// symbol name collisions.
     package: String,
 
+    /// User tag of a counter can be used to group counters together.
+    group: &'a str,
+    
+    storage: Storage,
+
+    /// Name of a counter.
+    name: &'a str,
+    
+    ty: Ty,
+    
+    severity: Severity,
+
     /// Unique identifier that disambiguates otherwise equivalent invocations in the same crate.
     disambiguator: u64,
-
-    /// Symbol categorization. Known values:
-    /// * `cnt_` for
-    /// * Anything starting with `defmt_` is reserved for use by defmt, other prefixes are free for
-    ///   use by third-party apps (but they all should use a prefix!).
-    tag: String,
-
-    /// Symbol data for use by the host tooling. Interpretation depends on `tag`.
-    data: &'a str,
 
     /// Crate name obtained via CARGO_CRATE_NAME (added since a Cargo package can contain many crates).
     crate_name: String,
 }
 
+/// Storage type used for a counter.
+#[derive(Copy, Clone)]
+pub(crate) enum Storage {
+    /// For counters stored in RAM, reset on boot.
+    RAM,
+    /// For counters stored in non-volatile memory.
+    BKP,
+}
+
+/// Numeric type of counter. Currently supported values: u32 and u64
+#[derive(Copy, Clone)]
+pub(crate) enum Ty {
+    U32,
+    U64Lo,
+    U64Hi,
+}
+
+/// Severity of a counter. Currently supported values: error, warn, info, debug, trace
+#[derive(Copy, Clone)]
+pub(crate) enum Severity {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
 impl<'a> Symbol<'a> {
-    fn new(tag: &'a str, data: &'a str) -> Self {
+    fn new(group: &'a str, storage: Storage, name: &'a str, ty: Ty, severity: Severity) -> Self {
         Self {
             // `CARGO_PKG_NAME` is set to the invoking package's name.
             package: env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "<unknown>".to_string()),
             disambiguator: crate::construct::crate_local_disambiguator(),
-            tag: format!("{}", tag),
-            data,
+            storage,
+            name,
+            ty,
+            severity,
+            group,
             crate_name: env::var("CARGO_CRATE_NAME").unwrap_or_else(|_| "<unknown>".to_string()),
         }
     }
 
     fn mangle(&self) -> String {
         format!(
-            r#"{{"package":"{}","tag":"{}","data":"{}","disambiguator":"{}","crate_name":"{}"}}"#,
+            r#"{{"package":"{}","group":"{}","storage":"{}","name":"{}","ty":"{}","severity":"{}","disambiguator":"{}","crate_name":"{}"}}"#,
             json_escape(&self.package),
-            json_escape(&self.tag),
-            json_escape(self.data),
+            json_escape(self.group),
+            self.storage.as_str(),
+            json_escape(self.name),
+            self.ty.as_str(),
+            self.severity.as_str(),
             self.disambiguator,
             json_escape(&self.crate_name),
         )
@@ -63,4 +99,35 @@ fn json_escape(string: &str) -> String {
         }
     }
     escaped
+}
+
+impl Storage {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Storage::RAM => "cnt_ram",
+            Storage::BKP => "cnt_bkp",
+        }
+    }
+}
+
+impl Ty {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Ty::U32 => "u32",
+            Ty::U64Lo => "u64_lo",
+            Ty::U64Hi => "u64_hi",
+        }
+    }
+}
+
+impl Severity {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warn => "warn",
+            Severity::Info => "info",
+            Severity::Debug => "debug",
+            Severity::Trace => "trace",
+        }
+    }
 }

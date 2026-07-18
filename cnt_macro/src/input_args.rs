@@ -2,24 +2,36 @@ use syn::{Expr, Ident, Token, parse::Parse};
 
 pub struct ExprAndNameArgs {
     pub expr: Expr,
-    pub _comma: Token![,],
     pub name: Ident,
-    pub _colon: Token![:],
     pub ty: Ident,
-    // pub _comma2: Token![,],
-    // pub expected: Option<Expr>,
+    pub severity: Option<Ident>,
+    pub group: Option<Ident>,
 }
 
 impl Parse for ExprAndNameArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let expr = input.parse()?;
+        let _comma = input.parse::<Token![,]>()?;
+        let name = input.parse()?;
+        let _colon = input.parse::<Token![:]>()?;
+        let ty = input.parse()?;
+        let severity = parse_optional_ident(input)?;
+        let group = parse_optional_ident(input)?;
         Ok(Self {
-            expr: input.parse()?,
-            _comma: input.parse()?,
-            name: input.parse()?,
-            _colon: input.parse()?,
-            ty: input.parse()?,
-            // _comma2: input.parse()?,
-            // expected: input.parse()?,
+            expr,
+            name,
+            ty,
+            severity,
+            group
         })
+    }
+}
+
+fn parse_optional_ident(input: syn::parse::ParseStream) -> syn::Result<Option<Ident>> {
+    if input.peek(Token![,]) {
+        input.parse::<Token![,]>()?;
+        Ok(Some(input.parse()?))
+    } else {
+        Ok(None)
     }
 }

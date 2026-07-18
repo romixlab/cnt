@@ -7,8 +7,8 @@ mod symbol;
 
 /// Increment RAM counter if expression evaluates to true. RAM counters are reset to zero on firmware restart (by startup code).
 ///
-/// Counters buffer size is controlled through CNT_RAM_BUFFER_SIZE_WORDS env variable.
-/// bedrock cli tool checks that actual number of counters used to dot overflow the buffer, if you don't use
+/// Counters buffer size is controlled through the `CNT_RAM_BUFFER_SIZE_WORDS` env variable.
+/// cnt cli tool checks that the actual number of counters used does not overflow the buffer, if you don't use
 /// the tool, then you can check manually, for example, by inspecting cargo nm output.
 ///
 /// Example:
@@ -21,6 +21,9 @@ mod symbol;
 /// cnt_if!(r.is_err(), err_count: u32);
 ///
 /// cnt_if!(true, uptime: u64); // consumes 2 words
+/// 
+/// cnt_if!(true, bytes_lost: u64, warn); // set severity, default is info, supported: error, warn, info, debug, trace
+/// cnt_if!(true, bytes_rx: u64, debug, usart); // set group name as well, useful if there are many counters in use
 /// ```
 #[proc_macro]
 pub fn cnt_if(args: TokenStream) -> TokenStream {

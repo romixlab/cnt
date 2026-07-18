@@ -1,39 +1,55 @@
-use crate::construct::{CounterKind, static_variable};
+use crate::construct::{static_variable};
 use crate::input_args::ExprAndNameArgs;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::parse2;
+use crate::symbol::{Severity, Storage, Ty};
 
 pub(crate) fn cnt_if(args: TokenStream) -> syn::Result<TokenStream> {
-    inner(args, CounterKind::RAM)
+    inner(args, Storage::RAM)
 }
 
 pub(crate) fn bkp_cnt_if(args: TokenStream) -> syn::Result<TokenStream> {
-    inner(args, CounterKind::BKP)
+    inner(args, Storage::BKP)
 }
 
-fn inner(args: TokenStream, counter_kind: CounterKind) -> syn::Result<TokenStream> {
+fn inner(args: TokenStream, storage: Storage) -> syn::Result<TokenStream> {
     let input = parse2::<ExprAndNameArgs>(args)?;
     let expr = &input.expr;
-    let counter_name = &input.name;
     if input.ty != "u32" && input.ty != "u64" {
         return Err(syn::Error::new(
             input.ty.span(),
             "only `u32` and `u64` counters are supported.",
         ));
     }
-    let ram_or_bkp = match counter_kind {
-        CounterKind::RAM => "ram",
-        CounterKind::BKP => "bkp",
+    let ram_or_bkp = match storage {
+        Storage::RAM => "ram",
+        Storage::BKP => "bkp",
     };
     let increment_fn = Ident::new(
         format!("increment_{}_{ram_or_bkp}", input.ty.to_string()).as_str(),
         Span::call_site(),
     );
+    let group = input.group.map(|g| g.to_string()).unwrap_or_default();
+    let name = input.name.to_string();
+    let severity = if let Some(severity) = input.severity {
+        match severity.to_string().as_str() {
+            "error" => Severity::Error,
+            "warn" => Severity::Warn,
+            "info" => Severity::Info,
+            "debug" => Severity::Debug,
+            "trace" => Severity::Trace,
+            o => return Err(syn::Error::new(
+                input.ty.span(),
+                format!("unknown severity: {o}, supported: error, warn, info, debug, trace"),
+            ))
+        }
+    } else {
+        Severity::Info
+    };
     let tokens = match input.ty.to_string().as_str() {
         "u32" => {
-            let data = format!("{counter_name}:{}", input.ty);
-            let counter_idx = static_variable(counter_kind, data.as_str());
+            let counter_idx = static_variable(group.as_str(), storage, &name, Ty::U32, severity);
             quote! {
                 if #expr {
                     let counter_idx = #counter_idx;
@@ -42,10 +58,8 @@ fn inner(args: TokenStream, counter_kind: CounterKind) -> syn::Result<TokenStrea
             }
         }
         "u64" => {
-            let data_lo = format!("{counter_name}:{},lo", input.ty);
-            let counter_idx_lo = static_variable(counter_kind, data_lo.as_str());
-            let data_hi = format!("{counter_name}:{},hi", input.ty);
-            let counter_idx_hi = static_variable(counter_kind, data_hi.as_str());
+            let counter_idx_lo = static_variable(group.as_str(), storage, &name, Ty::U64Lo, severity);
+            let counter_idx_hi = static_variable(group.as_str(), storage, &name, Ty::U64Hi, severity);
             quote! {
                 if #expr {
                     let counter_idx_lo = #counter_idx_lo;
