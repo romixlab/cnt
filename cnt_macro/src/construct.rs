@@ -51,8 +51,8 @@ pub(crate) fn static_variable(group: &str, storage: Storage, name: &str, ty: Ty,
         #[cfg_attr(target_os = "macos", unsafe(link_section = #section_for_macos))]
         #[cfg_attr(not(target_os = "macos"), unsafe(link_section = #section))]
         #[unsafe(export_name = #sym_name)]
-        static CNT: u8 = 0;
-        &CNT as *const u8 as usize
+        static CNT_INDEX: u8 = 0;
+        &CNT_INDEX as *const u8 as usize
     })
 }
 
