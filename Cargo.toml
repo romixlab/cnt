@@ -1,0 +1,8 @@
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+resolver = "3"
+
+members = ["cnt", "cnt_macro", "cnt_core", "cnt_cli"]
