@@ -1,10 +1,11 @@
 [package]
 name = "cnt_macro"
-version.workspace = true
+description = "Macro for the embedded counters crate - cnt"
+authors.workspace = true
 edition.workspace = true
-description = "RAM counters macro for microcontrollers, when logging is not an option"
-license = "MIT"
-repository = "https://github.com/romixlab/embedded_bedrock"
+license.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [lib]
 proc-macro = true

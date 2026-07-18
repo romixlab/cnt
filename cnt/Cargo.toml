@@ -1,10 +1,11 @@
 [package]
 name = "cnt"
-version.workspace = true
-edition.workspace = true
 description = "RAM counters macro for microcontrollers, when logging is not an option"
-license = "MIT"
-repository = "https://github.com/romixlab/embedded_bedrock"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 cnt_macro = { version = "0.1.0", path = "../cnt_macro" }
