@@ -2,8 +2,15 @@ use std::env;
 // Borrowed from defmt
 use std::fmt::Write;
 
-pub(crate) fn mangled(group: &str, storage: Storage, name: &str, ty: Ty, severity: Severity) -> String {
-    Symbol::new(group, storage, name, ty, severity).mangle()
+pub(crate) fn mangled(
+    group: &str,
+    storage: Storage,
+    name: &str,
+    ty: Ty,
+    unit: &str,
+    severity: Severity,
+) -> String {
+    Symbol::new(group, storage, name, ty, unit, severity).mangle()
 }
 
 struct Symbol<'a> {
@@ -13,14 +20,17 @@ struct Symbol<'a> {
 
     /// User tag of a counter can be used to group counters together.
     group: &'a str,
-    
+
     storage: Storage,
 
     /// Name of a counter.
     name: &'a str,
-    
+
     ty: Ty,
-    
+
+    /// Optional unit of a counter.
+    unit: &'a str,
+
     severity: Severity,
 
     /// Unique identifier that disambiguates otherwise equivalent invocations in the same crate.
@@ -58,7 +68,14 @@ pub(crate) enum Severity {
 }
 
 impl<'a> Symbol<'a> {
-    fn new(group: &'a str, storage: Storage, name: &'a str, ty: Ty, severity: Severity) -> Self {
+    fn new(
+        group: &'a str,
+        storage: Storage,
+        name: &'a str,
+        ty: Ty,
+        unit: &'a str,
+        severity: Severity,
+    ) -> Self {
         Self {
             // `CARGO_PKG_NAME` is set to the invoking package's name.
             package: env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "<unknown>".to_string()),
@@ -66,6 +83,7 @@ impl<'a> Symbol<'a> {
             storage,
             name,
             ty,
+            unit,
             severity,
             group,
             crate_name: env::var("CARGO_CRATE_NAME").unwrap_or_else(|_| "<unknown>".to_string()),
@@ -74,12 +92,13 @@ impl<'a> Symbol<'a> {
 
     fn mangle(&self) -> String {
         format!(
-            r#"{{"package":"{}","group":"{}","storage":"{}","name":"{}","ty":"{}","severity":"{}","disambiguator":"{}","crate_name":"{}"}}"#,
+            r#"{{"package":"{}","group":"{}","storage":"{}","name":"{}","ty":"{}","unit":"{}","severity":"{}","disambiguator":"{}","crate_name":"{}"}}"#,
             json_escape(&self.package),
             json_escape(self.group),
             self.storage.as_str(),
             json_escape(self.name),
             self.ty.as_str(),
+            json_escape(self.unit),
             self.severity.as_str(),
             self.disambiguator,
             json_escape(&self.crate_name),

@@ -25,7 +25,11 @@ fn list_entries(cnt: &CountersBlock) {
     );
     let mut total_size = 0;
     for c in cnt.entries().values() {
-        println!("{}:{:?} {:?}", c.name, c.ty, c.location);
+        if let Some(location) = &c.location {
+            println!("{c} at {location:?}");
+        } else {
+            println!("{c} at <unknown>");
+        }
         total_size += c.ty.len();
     }
     println!("{} total size: {}B", cnt.storage(), total_size);

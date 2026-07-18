@@ -84,7 +84,7 @@ pub fn render_table(
         Row::new([
             Cell::new(cnt.name.as_str()),
             Cell::new(format!("{:?}", value)),
-            Cell::new(format!("{:?} {}", cnt.ty, cnt.storage)),
+            Cell::new(format!("{} {}", cnt.ty, cnt.storage)),
             Cell::new(format!("{:?}", cnt.severity)),
             Cell::new(
                 cnt.location

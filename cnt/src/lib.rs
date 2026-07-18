@@ -1,7 +1,7 @@
 #![no_std]
 
 use crate::consts::{BKP_BUF_SIZE, RAM_BUF_SIZE};
-pub use cnt_macro::{cnt_if, bkp_cnt_if};
+pub use cnt_macro::{bkp_cnt_if, cnt_if};
 
 mod consts;
 
@@ -52,42 +52,43 @@ fn counters_bkp_buffer_mut() -> &'static mut [u32] {
     }
 }
 
-// TODO: Use atomics? and if not available - critical section
 #[inline(always)]
-pub unsafe fn increment_u32_ram(counter_idx: usize) {
+pub unsafe fn saturating_add_u32_ram(counter_idx: usize, rhs: u32) {
     let buffer = counters_ram_buffer_mut();
-    buffer[counter_idx] = buffer[counter_idx].saturating_add(1);
+    buffer[counter_idx] = buffer[counter_idx].saturating_add(rhs);
 }
 
 #[inline(always)]
-pub unsafe fn increment_u32_bkp(counter_idx: usize) {
+pub unsafe fn saturating_add_u32_bkp(counter_idx: usize, rhs: u32) {
     let buffer = counters_bkp_buffer_mut();
-    buffer[counter_idx] = buffer[counter_idx].saturating_add(1);
+    buffer[counter_idx] = buffer[counter_idx].saturating_add(rhs);
 }
 
 #[inline(always)]
-pub unsafe fn increment_u64_ram(counter_idx_lo: usize, counter_idx_hi: usize) {
+pub unsafe fn saturating_add_u64_ram(counter_idx_lo: usize, counter_idx_hi: usize, rhs: u64) {
     let buffer = counters_ram_buffer_mut();
-    increment_u64_inner(buffer, counter_idx_lo, counter_idx_hi);
+    saturating_add_u64_inner(buffer, counter_idx_lo, counter_idx_hi, rhs);
 }
 
 #[inline(always)]
-pub unsafe fn increment_u64_bkp(counter_idx_lo: usize, counter_idx_hi: usize) {
+pub unsafe fn saturating_add_u64_bkp(counter_idx_lo: usize, counter_idx_hi: usize, rhs: u64) {
     let buffer = counters_bkp_buffer_mut();
-    increment_u64_inner(buffer, counter_idx_lo, counter_idx_hi);
+    saturating_add_u64_inner(buffer, counter_idx_lo, counter_idx_hi, rhs);
 }
 
 #[inline(always)]
-fn increment_u64_inner(buffer: &mut [u32], counter_idx_lo: usize, counter_idx_hi: usize) {
+fn saturating_add_u64_inner(
+    buffer: &mut [u32],
+    counter_idx_lo: usize,
+    counter_idx_hi: usize,
+    rhs: u64,
+) {
     let lo = buffer[counter_idx_lo];
     let hi = buffer[counter_idx_hi];
-    if hi == u32::MAX {
-        buffer[counter_idx_lo] = lo.saturating_add(1);
-    } else {
-        let (lo, overflowed) = lo.overflowing_add(1);
-        buffer[counter_idx_lo] = lo;
-        if overflowed {
-            buffer[counter_idx_hi] = hi.saturating_add(1);
-        }
-    }
+    let value = (hi as u64) << 32 | (lo as u64);
+    let value = value.saturating_add(rhs);
+    let lo = value as u32 & u32::MAX;
+    let hi = (value >> 32) as u32;
+    buffer[counter_idx_lo] = lo;
+    buffer[counter_idx_hi] = hi;
 }

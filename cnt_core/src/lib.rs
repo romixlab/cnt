@@ -28,6 +28,7 @@ pub struct Counter {
     pub name: String,
     pub storage: Storage,
     pub ty: Ty,
+    pub unit: String,
     pub severity: Severity,
     pub location: Option<Location>,
     pub buf: Buffer,
@@ -104,15 +105,6 @@ impl Counters {
     }
 }
 
-impl Display for Storage {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Storage::RAM => write!(f, "RAM"),
-            Storage::BKP => write!(f, "BKP"),
-        }
-    }
-}
-
 impl CountersBlock {
     pub fn entries(&self) -> &BTreeMap<u64, Counter> {
         &self.entries
@@ -160,11 +152,39 @@ impl CountersBlock {
     }
 }
 
+impl Display for Storage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Storage::RAM => write!(f, "RAM"),
+            Storage::BKP => write!(f, "BKP"),
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Value::U32(v) => write!(f, "{}", v),
             Value::U64(v) => write!(f, "{}", v),
         }
+    }
+}
+
+impl Display for Ty {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Ty::U32 => write!(f, "u32"),
+            Ty::U64 => write!(f, "u64"),
+        }
+    }
+}
+
+impl Display for Counter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.name, self.ty)?;
+        if !self.unit.is_empty() {
+            write!(f, " `{}`", self.unit)?;
+        }
+        Ok(())
     }
 }

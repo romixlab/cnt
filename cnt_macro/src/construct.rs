@@ -3,10 +3,10 @@ use std::{
     hash::{Hash as _, Hasher as _},
 };
 
+use crate::symbol::{Severity, Storage, Ty};
 use proc_macro::Span;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use crate::symbol::{Severity, Storage, Ty};
 
 pub(crate) fn crate_local_disambiguator() -> u64 {
     // We want a deterministic, but unique-per-macro-invocation identifier. For that we
@@ -42,8 +42,15 @@ pub(crate) fn linker_section(
     format!(".{section}{sub_section}")
 }
 
-pub(crate) fn static_variable(group: &str, storage: Storage, name: &str, ty: Ty, severity: Severity) -> TokenStream2 {
-    let sym_name = crate::symbol::mangled(group, storage, name, ty, severity);
+pub(crate) fn static_variable(
+    group: &str,
+    storage: Storage,
+    name: &str,
+    ty: Ty,
+    unit: &str,
+    severity: Severity,
+) -> TokenStream2 {
+    let sym_name = crate::symbol::mangled(group, storage, name, ty, unit, severity);
     let section = linker_section(storage, false, None, &sym_name);
     let section_for_macos = linker_section(storage, true, None, &sym_name);
 
