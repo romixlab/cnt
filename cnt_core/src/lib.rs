@@ -132,9 +132,10 @@ impl CountersBlock {
         }
         for (addr, counter) in self.entries.iter() {
             let idx = *addr as usize;
+            let base = idx * 4;
             let value = match counter.ty {
-                Ty::U32 => Value::U32(u32::from_le_bytes(buf[idx..idx + 4].try_into()?)),
-                Ty::U64 => Value::U64(u64::from_le_bytes(buf[idx..idx + 8].try_into()?)),
+                Ty::U32 => Value::U32(u32::from_le_bytes(buf[base..base + 4].try_into()?)),
+                Ty::U64 => Value::U64(u64::from_le_bytes(buf[base..base + 8].try_into()?)),
             };
             self.values.insert(*addr, value);
         }
