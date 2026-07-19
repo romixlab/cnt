@@ -1,18 +1,11 @@
 use cnt_core::{Counters, CountersBlock};
-use probe_rs::probe::list::Lister;
-use probe_rs::{Core, MemoryInterface, Permissions};
+use probe_rs::{Core, MemoryInterface};
 
-pub fn read(counters: &mut Counters) -> anyhow::Result<()> {
+pub fn read(counters: &mut Counters, mut core: Core) -> anyhow::Result<()> {
     if counters.is_empty() {
         println!("No counters found");
         return Ok(());
     }
-
-    let lister = Lister::new();
-    let probes = lister.list_all();
-    let probe = probes[0].open()?;
-    let mut session = probe.attach("STM32H533RE", Permissions::default())?;
-    let mut core = session.core(0)?;
 
     if let Some(cnt) = counters.ram_counters_mut() {
         read_counters(cnt, &mut core)?;

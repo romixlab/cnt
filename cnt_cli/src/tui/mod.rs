@@ -1,9 +1,7 @@
 use cnt_core::{Counters, CountersBlock, Value};
-use color_eyre::Result;
 use crossterm::event::{self, KeyCode};
 use human_repr::HumanCount;
-use probe_rs::probe::list::Lister;
-use probe_rs::{MemoryInterface, Permissions};
+use probe_rs::{Core, MemoryInterface};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -11,15 +9,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table, TableState};
 use std::time::Duration;
 
-pub fn tui(counters: &mut Counters) -> Result<()> {
-    color_eyre::install()?;
+pub fn tui(counters: &mut Counters, core: &mut Core) -> anyhow::Result<()> {
     let counters = counters.ram_counters_mut().unwrap();
-
-    let lister = Lister::new();
-    let probes = lister.list_all();
-    let probe = probes[0].open()?;
-    let mut session = probe.attach("STM32H533RE", Permissions::default())?;
-    let mut core = session.core(0)?;
 
     let mut table_state = TableState::default();
     table_state.select_first();
@@ -38,6 +29,7 @@ pub fn tui(counters: &mut Counters) -> Result<()> {
                         KeyCode::Char('h') | KeyCode::Left => table_state.select_previous_column(),
                         KeyCode::Char('g') => table_state.select_first(),
                         KeyCode::Char('G') => table_state.select_last(),
+                        KeyCode::Char('r') => crate::cli::reset::reset(counters, core)?,
                         _ => {}
                     }
                 }
@@ -109,7 +101,7 @@ pub fn render_table(
     frame.render_stateful_widget(table, area, table_state);
 }
 
-fn human_readable_value(value: Option<Value>, unit: &str) -> Cell {
+fn human_readable_value(value: Option<Value>, unit: &'_ str) -> Cell<'_> {
     match value {
         None => Cell::new("n/a"),
         Some(v) => {

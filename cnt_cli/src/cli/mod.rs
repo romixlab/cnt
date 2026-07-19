@@ -1,8 +1,11 @@
 mod list;
 mod read;
+pub mod reset;
 
 use clap::{Parser, Subcommand};
 use cnt_core::Counters;
+use probe_rs::probe::list::Lister;
+use probe_rs::{Permissions, Session};
 use std::path::PathBuf;
 
 /// Command line interface for the embedded counters crate.
@@ -25,6 +28,12 @@ pub(crate) enum Command {
     List,
     /// Read counters from a connected target using probe-rs
     Read,
+    /// Reset counters to zero on a connected target
+    Reset {
+        /// Reset BKP counters as well if they are in use
+        #[clap(default_value = "false", long)]
+        bkp: bool,
+    },
     /// Run terminal UI
     Tui,
 }
@@ -35,11 +44,35 @@ pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
             list::list(&counters);
         }
         Command::Read => {
-            read::read(&mut counters)?;
+            let mut session = connect_probe()?;
+            let core = session.core(0)?;
+            read::read(&mut counters, core)?;
+        }
+        Command::Reset { bkp } => {
+            let mut session = connect_probe()?;
+            let mut core = session.core(0)?;
+            if let Some(block) = counters.ram_counters() {
+                println!("Resetting RAM counters");
+                reset::reset(&block, &mut core)?;
+            }
+            if bkp && let Some(block) = counters.bkp_counters() {
+                println!("Resetting BKP counters");
+                reset::reset(&block, &mut core)?;
+            }
         }
         Command::Tui => {
-            crate::tui::tui(&mut counters).unwrap();
+            let mut session = connect_probe()?;
+            let mut core = session.core(0)?;
+            crate::tui::tui(&mut counters, &mut core)?;
         }
     }
     Ok(())
+}
+
+fn connect_probe() -> anyhow::Result<Session> {
+    let lister = Lister::new();
+    let probes = lister.list_all();
+    let probe = probes[0].open()?;
+    let session = probe.attach("STM32H533RE", Permissions::default())?;
+    Ok(session)
 }
