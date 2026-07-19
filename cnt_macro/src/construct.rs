@@ -49,6 +49,7 @@ pub(crate) fn static_variable(
     ty: Ty,
     unit: &str,
     severity: Severity,
+    words: usize,
 ) -> TokenStream2 {
     let sym_name = crate::symbol::mangled(group, storage, name, ty, unit, severity);
     let section = linker_section(storage, false, None, &sym_name);
@@ -58,7 +59,7 @@ pub(crate) fn static_variable(
         #[cfg_attr(target_os = "macos", unsafe(link_section = #section_for_macos))]
         #[cfg_attr(not(target_os = "macos"), unsafe(link_section = #section))]
         #[unsafe(export_name = #sym_name)]
-        static CNT_INDEX: u8 = 0;
+        static CNT_INDEX: [u8; #words] = [0; #words];
         &CNT_INDEX as *const u8 as usize
     })
 }

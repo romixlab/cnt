@@ -29,7 +29,8 @@ fn counters_ram_buffer_mut() -> &'static mut [u32] {
 }
 
 #[unsafe(no_mangle)]
-#[unsafe(link_section = ".cnt_bkp_buffer")]
+// #[cfg_attr(target_os = "macos", unsafe(link_section = ".cnt_bkp_buffer,cnt.BUFFER"))]
+// #[cfg_attr(not(target_os = "macos"), link_section = ".cnt_bkp_buffer.cnt.BUFFER")]
 static mut _CNT_BKP_BUFFER: [u32; BKP_BUF_SIZE] = [0; BKP_BUF_SIZE];
 
 #[inline(always)]
@@ -64,31 +65,20 @@ pub unsafe fn saturating_add_u32_bkp(counter_idx: usize, rhs: u32) {
     buffer[counter_idx] = buffer[counter_idx].saturating_add(rhs);
 }
 
-#[inline(always)]
-pub unsafe fn saturating_add_u64_ram(counter_idx_lo: usize, counter_idx_hi: usize, rhs: u64) {
-    let buffer = counters_ram_buffer_mut();
-    saturating_add_u64_inner(buffer, counter_idx_lo, counter_idx_hi, rhs);
+pub unsafe fn saturating_add_u64_ram(counter_idx_lo: usize, rhs: u64) {
+    unsafe {
+        let value = counters_ram_buffer_mut()
+            .as_mut_ptr()
+            .offset(counter_idx_lo as isize) as *mut u64;
+        *value = (*value).saturating_add(rhs);
+    }
 }
 
-#[inline(always)]
-pub unsafe fn saturating_add_u64_bkp(counter_idx_lo: usize, counter_idx_hi: usize, rhs: u64) {
-    let buffer = counters_bkp_buffer_mut();
-    saturating_add_u64_inner(buffer, counter_idx_lo, counter_idx_hi, rhs);
-}
-
-#[inline(always)]
-fn saturating_add_u64_inner(
-    buffer: &mut [u32],
-    counter_idx_lo: usize,
-    counter_idx_hi: usize,
-    rhs: u64,
-) {
-    let lo = buffer[counter_idx_lo];
-    let hi = buffer[counter_idx_hi];
-    let value = (hi as u64) << 32 | (lo as u64);
-    let value = value.saturating_add(rhs);
-    let lo = value as u32 & u32::MAX;
-    let hi = (value >> 32) as u32;
-    buffer[counter_idx_lo] = lo;
-    buffer[counter_idx_hi] = hi;
+pub unsafe fn saturating_add_u64_bkp(counter_idx_lo: usize, rhs: u64) {
+    unsafe {
+        let value = counters_bkp_buffer_mut()
+            .as_mut_ptr()
+            .offset(counter_idx_lo as isize) as *mut u64;
+        *value = (*value).saturating_add(rhs);
+    }
 }

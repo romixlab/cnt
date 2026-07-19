@@ -139,7 +139,7 @@ fn collect_counters<'f>(
         };
         let ty = if symbol.ty == "u32" {
             Ty::U32
-        } else if symbol.ty == "u64_lo" {
+        } else if symbol.ty == "u64" {
             Ty::U64
         } else {
             continue;

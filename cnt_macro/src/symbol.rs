@@ -53,8 +53,7 @@ pub(crate) enum Storage {
 #[derive(Copy, Clone)]
 pub(crate) enum Ty {
     U32,
-    U64Lo,
-    U64Hi,
+    U64,
 }
 
 /// Severity of a counter. Currently supported values: error, warn, info, debug, trace
@@ -133,8 +132,7 @@ impl Ty {
     fn as_str(&self) -> &'static str {
         match self {
             Ty::U32 => "u32",
-            Ty::U64Lo => "u64_lo",
-            Ty::U64Hi => "u64_hi",
+            Ty::U64 => "u64",
         }
     }
 }

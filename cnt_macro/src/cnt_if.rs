@@ -54,7 +54,7 @@ fn inner(args: TokenStream, storage: Storage) -> syn::Result<TokenStream> {
     let tokens = match input.ty.to_string().as_str() {
         "u32" => {
             let counter_idx =
-                static_variable(group.as_str(), storage, &name, Ty::U32, &unit, severity);
+                static_variable(group.as_str(), storage, &name, Ty::U32, &unit, severity, 1);
             quote! {
                 if #expr {
                     let counter_idx = #counter_idx;
@@ -63,15 +63,12 @@ fn inner(args: TokenStream, storage: Storage) -> syn::Result<TokenStream> {
             }
         }
         "u64" => {
-            let counter_idx_lo =
-                static_variable(group.as_str(), storage, &name, Ty::U64Lo, &unit, severity);
-            let counter_idx_hi =
-                static_variable(group.as_str(), storage, &name, Ty::U64Hi, &unit, severity);
+            let counter_idx =
+                static_variable(group.as_str(), storage, &name, Ty::U64, &unit, severity, 2);
             quote! {
                 if #expr {
-                    let counter_idx_lo = #counter_idx_lo;
-                    let counter_idx_hi = #counter_idx_hi;
-                    unsafe { cnt::#increment_fn(counter_idx_lo, counter_idx_hi, #rhs); };
+                    let counter_idx = #counter_idx;
+                    unsafe { cnt::#increment_fn(counter_idx, #rhs); };
                 }
             }
         }
