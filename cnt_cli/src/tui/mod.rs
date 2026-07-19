@@ -1,6 +1,7 @@
-use cnt_core::{Counters, CountersBlock};
+use cnt_core::{Counters, CountersBlock, Value};
 use color_eyre::Result;
 use crossterm::event::{self, KeyCode};
+use human_repr::HumanCount;
 use probe_rs::probe::list::Lister;
 use probe_rs::{MemoryInterface, Permissions};
 use ratatui::Frame;
@@ -83,7 +84,7 @@ pub fn render_table(
     let rows = counters.values_opt().map(|(cnt, value)| {
         Row::new([
             Cell::new(cnt.name.as_str()),
-            Cell::new(format!("{:?}", value)),
+            human_readable_value(value, &cnt.unit),
             Cell::new(format!("{} {}", cnt.ty, cnt.storage)),
             Cell::new(format!("{:?}", cnt.severity)),
             Cell::new(
@@ -106,4 +107,21 @@ pub fn render_table(
         .highlight_symbol("🍴 ");
 
     frame.render_stateful_widget(table, area, table_state);
+}
+
+fn human_readable_value(value: Option<Value>, unit: &str) -> Cell {
+    match value {
+        None => Cell::new("n/a"),
+        Some(v) => {
+            if unit.is_empty() {
+                Cell::new(v.to_string())
+            } else {
+                if unit == "B" {
+                    Cell::new(v.to_u64().human_count_bytes().to_string())
+                } else {
+                    Cell::new(v.to_string())
+                }
+            }
+        }
+    }
 }

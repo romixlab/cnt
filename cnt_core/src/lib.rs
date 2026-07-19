@@ -161,6 +161,15 @@ impl Display for Storage {
     }
 }
 
+impl Value {
+    pub fn to_u64(&self) -> u64 {
+        match self {
+            Value::U32(v) => *v as u64,
+            Value::U64(v) => *v,
+        }
+    }
+}
+
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {

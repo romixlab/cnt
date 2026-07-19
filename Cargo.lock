@@ -401,6 +401,7 @@ dependencies = [
  "cnt_core",
  "color-eyre",
  "crossterm",
+ "human-repr",
  "probe-rs",
  "ratatui",
 ]
@@ -1173,6 +1174,12 @@ dependencies = [
  "pkg-config",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "human-repr"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f58b778a5761513caf593693f8951c97a5b610841e754788400f32102eefdff1"
 
 [[package]]
 name = "hybrid-array"
