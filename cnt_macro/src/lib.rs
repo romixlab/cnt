@@ -11,19 +11,41 @@ mod symbol;
 /// cnt cli tool checks that the actual number of counters used does not overflow the buffer, if you don't use
 /// the tool, then you can check manually, for example, by inspecting cargo nm output.
 ///
-/// Example:
+/// Create and increment a counter named `blink_count` every time this line is executed:
 /// ```
-/// use cnt_macro::cnt_if;
+/// # use cnt_macro::cnt_if;
+/// cnt_if!(true, blink_count: u32 += 1); // increment unconditionally
+/// ```
 ///
-/// cnt_if!(true, blink_count: u32); // increment unconditionally
+/// Increment only when there is an error:
+/// ```
+/// let r: Result<(), ()> = Err(()); // some process returning a Result
+/// cnt_if!(r.is_err(), err_count: u32 += 1);
+/// ```
 ///
-/// let r = Err(()); // some process returning a Result
-/// cnt_if!(r.is_err(), err_count: u32);
+/// Any expression is supported instead of one:
+/// ```
+/// cnt_if!(true, event_count: u32 += 1 + request.len());
+/// ```
 ///
-/// cnt_if!(true, uptime: u64); // consumes 2 words
-/// 
-/// cnt_if!(true, bytes_lost: u64, warn); // set severity, default is info, supported: error, warn, info, debug, trace
-/// cnt_if!(true, bytes_rx: u64, debug, usart); // set group name as well, useful if there are many counters in use
+/// `u64` is supported as well:
+/// ```
+/// cnt_if!(true, uptime: u64 += 1); // consumes 2 words
+/// ```
+///
+/// Set severity, default is info, supported: error, warn, info, debug, trace:
+/// ```
+/// cnt_if!(true, bytes_lost: u64 += 1, warn);
+/// ```
+///
+/// Set group name, useful when there are many counters in use:
+/// ```
+/// cnt_if!(true, bytes_rx: u64 += buf.len(), debug, usart);
+/// ```
+///
+/// Set unit for better readability, upstream software can then convert from e.g., Bytes to KiB or MiB automatically:
+/// ```
+/// cnt_if!(true, bytes_rx: u64 "B" += buf.len(), debug, usart);
 /// ```
 #[proc_macro]
 pub fn cnt_if(args: TokenStream) -> TokenStream {
@@ -35,23 +57,10 @@ pub fn cnt_if(args: TokenStream) -> TokenStream {
 
 /// Increment non-volatile counter if expression evaluates to true. Non-volatile counters buffer is supposed to be placed into
 /// BKPRAM memory, or into RCC or TAMP registers, that do not lose contents on reset (provided there is a battery connected).
-/// TODO: reset counters on firmware reflash through the cli tool.
 ///
 /// Counters buffer size is controlled through CNT_BKP_BUFFER_SIZE_WORDS env variable (default is 0).
 /// bedrock cli tool checks that actual number of counters used to dot overflow the buffer, if you don't use
 /// the tool, then you can check manually, for example, by inspecting cargo nm output.
-///
-/// Example:
-/// ```
-/// use cnt_macro::bkp_cnt_if;
-///
-/// bkp_cnt_if!(true, hard_fault_count_total: u32); // increment unconditionally
-///
-/// let r = Err(()); // some process returning a Result
-/// bkp_cnt_if!(r.is_err(), err_count_total: u32);
-///
-/// bkp_cnt_if!(true, impulses_total: u64); // consumes 2 words
-/// ```
 #[proc_macro]
 pub fn bkp_cnt_if(args: TokenStream) -> TokenStream {
     match cnt_if::bkp_cnt_if(args.into()) {
