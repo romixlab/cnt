@@ -1,3 +1,8 @@
+
+[workspace]
+resolver = "3"
+
+members = ["cnt", "cnt_cli", "cnt_core", "cnt_macro"]
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
@@ -6,10 +11,7 @@ license = "MIT"
 description = "When logging is not an option - count"
 repository = "https://github.com/romixlab/cnt"
 
-[workspace]
-resolver = "3"
-
-members = ["cnt", "cnt_macro", "cnt_core", "cnt_cli"]
-
 [workspace.dependencies]
 anyhow = "1.0"
+cnt_core = { path = "./cnt_core", version = "0.2" }
+cnt_macro = { path = "./cnt_macro", version = "0.2" }
