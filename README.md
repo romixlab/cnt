@@ -41,6 +41,8 @@ fn process_packet() {
 * Flash your firmware and run the CLI tool:
   * To read once: `cnt_cli <PATH_TO_ELF> read`
   * Tu run TUI: `cnt_cli <PATH_TO_ELF> tui`
+
+<img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
   
 ## How to get counters data from fw itself
 
