@@ -7,7 +7,8 @@ mod consts;
 
 #[used]
 #[unsafe(no_mangle)]
-#[unsafe(link_section = ".rodata.cnt_signature")]
+#[cfg_attr(target_os = "macos", unsafe(link_section = ".rodata,cnt_signature"))]
+#[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".rodata.cnt_signature"))]
 static mut _CNT_SIGNATURE: [u8; 8] = [0; 8];
 
 #[unsafe(no_mangle)]
