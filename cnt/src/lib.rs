@@ -5,6 +5,11 @@ pub use cnt_macro::{bkp_cnt_if, cnt_if};
 
 mod consts;
 
+#[used]
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".rodata.cnt_signature")]
+static mut _CNT_SIGNATURE: [u8; 8] = [0; 8];
+
 #[unsafe(no_mangle)]
 static mut _CNT_RAM_BUFFER: [u32; RAM_BUF_SIZE] = [0; RAM_BUF_SIZE];
 
