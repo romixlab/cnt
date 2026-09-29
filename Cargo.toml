@@ -13,5 +13,5 @@ repository = "https://github.com/romixlab/cnt"
 
 [workspace.dependencies]
 anyhow = "1.0"
-cnt_core = { path = "./cnt_core", version = "0.3" }
-cnt_macro = { path = "./cnt_macro", version = "0.3" }
+cnt_core = { path = "./cnt_core", version = "0.4" }
+cnt_macro = { path = "./cnt_macro", version = "0.4" }
