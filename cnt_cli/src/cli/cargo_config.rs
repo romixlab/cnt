@@ -5,6 +5,8 @@
 //! runner = "probe-rs run --chip STM32H533RE"
 //! ```
 
+use super::theme::theme;
+use anstream::eprintln;
 use std::path::{Path, PathBuf};
 
 /// A chip name found in a cargo config file.
@@ -48,7 +50,11 @@ fn chip_from_file(path: &Path, elf_path: &Path) -> Option<String> {
     let config: toml::Table = match content.parse() {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("⚠️ Failed to parse {}: {e}", path.display());
+            let (warn, style) = (theme().warn, theme().path);
+            eprintln!(
+                "⚠️ {warn}Failed to parse{warn:#} {style}{}{style:#}{warn}: {e}{warn:#}",
+                path.display()
+            );
             return None;
         }
     };
@@ -69,8 +75,9 @@ fn chip_from_file(path: &Path, elf_path: &Path) -> Option<String> {
     }
     let (_, first) = chips.first()?;
     if chips.iter().any(|(_, chip)| chip != first) {
+        let (warn, style) = (theme().warn, theme().path);
         eprintln!(
-            "⚠️ Multiple chips found in runners in {}, specify one with --chip",
+            "⚠️ {warn}Multiple chips found in runners in{warn:#} {style}{}{style:#}{warn}, specify one with --chip{warn:#}",
             path.display()
         );
         return None;

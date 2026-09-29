@@ -372,6 +372,8 @@ dependencies = [
 name = "cnt_cli"
 version = "0.2.0"
 dependencies = [
+ "anstream",
+ "anstyle",
  "anyhow",
  "clap",
  "cnt_core",

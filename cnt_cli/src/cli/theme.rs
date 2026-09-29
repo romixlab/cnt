@@ -1,9 +1,11 @@
-//! Colour theme for clap help and error output.
+//! Colour theme for clap help and error output, and for the output of subcommands.
 //!
 //! A 24-bit colour palette based on the IntelliJ "Dark" scheme is used on terminals with truecolor support, with a
 //! 16-colour fallback for everything else.
 
 use clap::builder::styling::{AnsiColor, Color, Effects, RgbColor, Style, Styles};
+use cnt_core::Severity;
+use std::sync::LazyLock;
 
 /// A palette of colours for the elements clap can style.
 struct Palette {
@@ -66,6 +68,82 @@ const FALLBACK_PALETTE: Palette = Palette {
     invalid: Color::Ansi(AnsiColor::BrightRed),
     error: Color::Ansi(AnsiColor::Red),
 };
+
+/// Styles for the output of subcommands.
+pub struct Theme {
+    /// Secondary information: hints, addresses, sizes
+    pub hint: Style,
+    /// File paths
+    pub path: Style,
+    /// Section headers
+    pub header: Style,
+    pub warn: Style,
+    pub error: Style,
+    severity: [Style; 5],
+}
+
+impl Theme {
+    /// Style for a non-zero counter of the given severity.
+    pub fn severity(&self, severity: Severity) -> Style {
+        self.severity[severity as usize]
+    }
+}
+
+/// 24-bit output theme, following the IntelliJ "Dark" editor colour scheme.
+const DEFAULT_THEME: Theme = Theme {
+    hint: Style::new().fg_color(Some(rgb(0x7A, 0x7E, 0x85))), // comment gray
+    path: Style::new().fg_color(Some(rgb(0x2A, 0xAC, 0xB8))), // number cyan
+    header: Style::new().effects(Effects::BOLD),
+    warn: Style::new()
+        .fg_color(Some(rgb(0xE0, 0xBB, 0x65)))
+        .effects(Effects::BOLD),
+    error: Style::new()
+        .fg_color(Some(rgb(0xF7, 0x54, 0x64)))
+        .effects(Effects::BOLD),
+    severity: [
+        Style::new()
+            .fg_color(Some(rgb(0xF7, 0x54, 0x64)))
+            .effects(Effects::BOLD), // error
+        Style::new().fg_color(Some(rgb(0xE0, 0xBB, 0x65))), // warn
+        Style::new().fg_color(Some(rgb(0x6A, 0xAB, 0x73))), // info
+        Style::new().fg_color(Some(rgb(0x56, 0xA8, 0xF5))), // debug
+        Style::new().fg_color(Some(rgb(0xC7, 0x7D, 0xBA))), // trace
+    ],
+};
+
+/// 16-colour approximation of [`DEFAULT_THEME`].
+const FALLBACK_THEME: Theme = Theme {
+    hint: Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlack))),
+    path: Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))),
+    header: Style::new().effects(Effects::BOLD),
+    warn: Style::new()
+        .fg_color(Some(Color::Ansi(AnsiColor::Yellow)))
+        .effects(Effects::BOLD),
+    error: Style::new()
+        .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+        .effects(Effects::BOLD),
+    severity: [
+        Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+            .effects(Effects::BOLD),
+        Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))),
+        Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))),
+        Style::new().fg_color(Some(Color::Ansi(AnsiColor::Blue))),
+        Style::new().fg_color(Some(Color::Ansi(AnsiColor::Magenta))),
+    ],
+};
+
+/// The output theme for the current terminal. Colours are stripped by `anstream` when not writing to a terminal.
+pub fn theme() -> &'static Theme {
+    static THEME: LazyLock<&Theme> = LazyLock::new(|| {
+        if truecolor() {
+            &DEFAULT_THEME
+        } else {
+            &FALLBACK_THEME
+        }
+    });
+    *THEME
+}
 
 /// Best-effort truecolor detection (`COLORTERM`, then known-good `TERM` values).
 fn truecolor() -> bool {

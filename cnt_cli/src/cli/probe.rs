@@ -1,6 +1,8 @@
 //! Probe and target selection, following the conventions of the probe-rs CLI.
 
 use super::cargo_config;
+use super::theme::theme;
+use anstream::eprintln;
 use anyhow::{Context, bail};
 use clap::Args;
 use probe_rs::config::{Registry, RegistryError, TargetSelector};
@@ -56,7 +58,8 @@ impl ProbeOptions {
                 .set_speed(speed)
                 .with_context(|| format!("Failed to set speed to {speed} kHz"))?;
             if actual != speed {
-                eprintln!("⚠️ Requested {speed} kHz, probe is using {actual} kHz");
+                let warn = theme().warn;
+                eprintln!("⚠️ {warn}Requested {speed} kHz, probe is using {actual} kHz{warn:#}");
             }
         }
 
@@ -106,7 +109,12 @@ impl ProbeOptions {
         let Some(found) = cargo_config::find_chip(elf_path) else {
             return Ok(TargetSelector::Auto);
         };
-        eprintln!("Using chip {} from {}", found.chip, found.path.display());
+        let (hint, path) = (theme().hint, theme().path);
+        eprintln!(
+            "{hint}Using chip{hint:#} {} {hint}from{hint:#} {path}{}{path:#}",
+            found.chip,
+            found.path.display()
+        );
         let target = registry
             .get_target_by_name(&found.chip)
             .with_context(|| format!("Invalid chip in {}", found.path.display()))?;
@@ -144,7 +152,8 @@ fn select_probe(probes: &[DebugProbeInfo]) -> anyhow::Result<&DebugProbeInfo> {
         bail!("Multiple probes found, select one with --probe VID:PID[:SERIAL]:\n{list}");
     }
 
-    eprintln!("Available probes:\n{list}");
+    let hint = theme().hint;
+    eprintln!("{hint}Available probes:{hint:#}\n{list}");
     let stdin = std::io::stdin();
     loop {
         eprint!("Select probe (0-{}): ", probes.len() - 1);
@@ -155,7 +164,10 @@ fn select_probe(probes: &[DebugProbeInfo]) -> anyhow::Result<&DebugProbeInfo> {
         }
         match line.trim().parse::<usize>() {
             Ok(i) if i < probes.len() => return Ok(&probes[i]),
-            _ => eprintln!("Invalid selection"),
+            _ => {
+                let warn = theme().warn;
+                eprintln!("{warn}Invalid selection{warn:#}");
+            }
         }
     }
 }

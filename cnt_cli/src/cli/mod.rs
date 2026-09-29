@@ -6,6 +6,7 @@ mod read;
 pub mod reset;
 mod theme;
 
+use anstream::{eprintln, println};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::Counters;
 use probe::ProbeOptions;
@@ -51,7 +52,8 @@ impl Elf {
             Some(path) => Ok(path.clone()),
             None => {
                 let path = elf::find_elf()?;
-                eprintln!("Using ELF {}", path.display());
+                let (hint, style) = (theme::theme().hint, theme::theme().path);
+                eprintln!("{hint}Using ELF{hint:#} {style}{}{style:#}", path.display());
                 Ok(path)
             }
         }
@@ -112,12 +114,13 @@ pub fn process_cmd(cmd: Command, mut counters: Counters, elf_path: &Path) -> any
         Command::Reset { bkp, probe, .. } => {
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
+            let hint = theme::theme().hint;
             if let Some(block) = counters.ram_counters() {
-                println!("Resetting RAM counters");
+                println!("{hint}Resetting RAM counters{hint:#}");
                 reset::reset(&block, &mut core)?;
             }
             if bkp && let Some(block) = counters.bkp_counters() {
-                println!("Resetting BKP counters");
+                println!("{hint}Resetting BKP counters{hint:#}");
                 reset::reset(&block, &mut core)?;
             }
         }
