@@ -44,9 +44,9 @@ struct Symbol<'a> {
 #[derive(Copy, Clone)]
 pub(crate) enum Storage {
     /// For counters stored in RAM, reset on boot.
-    RAM,
+    Ram,
     /// For counters stored in non-volatile memory.
-    BKP,
+    Bkp,
 }
 
 /// Numeric type of counter. Currently supported values: u32 and u64
@@ -122,8 +122,8 @@ fn json_escape(string: &str) -> String {
 impl Storage {
     fn as_str(&self) -> &'static str {
         match self {
-            Storage::RAM => "cnt_ram",
-            Storage::BKP => "cnt_bkp",
+            Storage::Ram => "cnt_ram",
+            Storage::Bkp => "cnt_bkp",
         }
     }
 }

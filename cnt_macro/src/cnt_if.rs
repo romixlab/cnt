@@ -6,11 +6,11 @@ use quote::quote;
 use syn::parse2;
 
 pub(crate) fn cnt_if(args: TokenStream) -> syn::Result<TokenStream> {
-    inner(args, Storage::RAM)
+    inner(args, Storage::Ram)
 }
 
 pub(crate) fn bkp_cnt_if(args: TokenStream) -> syn::Result<TokenStream> {
-    inner(args, Storage::BKP)
+    inner(args, Storage::Bkp)
 }
 
 fn inner(args: TokenStream, storage: Storage) -> syn::Result<TokenStream> {
@@ -23,11 +23,11 @@ fn inner(args: TokenStream, storage: Storage) -> syn::Result<TokenStream> {
         ));
     }
     let ram_or_bkp = match storage {
-        Storage::RAM => "ram",
-        Storage::BKP => "bkp",
+        Storage::Ram => "ram",
+        Storage::Bkp => "bkp",
     };
     let increment_fn = Ident::new(
-        format!("saturating_add_{}_{ram_or_bkp}", input.ty.to_string()).as_str(),
+        format!("saturating_add_{}_{ram_or_bkp}", input.ty).as_str(),
         Span::call_site(),
     );
     let group = input.group.map(|g| g.to_string()).unwrap_or_default();

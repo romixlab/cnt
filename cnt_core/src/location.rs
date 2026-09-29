@@ -1,14 +1,17 @@
 //! Borrowed from defmt
-use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use crate::Location;
+use crate::load::dedup;
 use anyhow::{anyhow, bail, ensure};
 use gimli::DebuggingInformationEntry;
 use object::{File, Object, ObjectSection};
-use crate::load::dedup;
-use crate::Location;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
-pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTreeMap<u64, Location>, anyhow::Error> {
+pub(crate) fn get_locations(
+    elf: &File,
+    filter_symbols: &[&str],
+) -> Result<BTreeMap<u64, Location>, anyhow::Error> {
     let endian = if elf.is_little_endian() {
         gimli::RunTimeEndian::Little
     } else {
@@ -120,7 +123,7 @@ pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTree
                     let linkage_name = core::str::from_utf8(&linkage_name_slice)?;
 
                     if name == "CNT_INDEX" {
-                        if filter_symbols.iter().any(|i| *i == linkage_name) {
+                        if filter_symbols.contains(&linkage_name) {
                             let addr = exprloc2address(unit.encoding(), &loc)?;
                             let file = file_index_to_path(file_index, &unit, &dwarf)?;
                             let module = segments
@@ -133,7 +136,12 @@ pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTree
                             let file = dedup(&mut dedup_path, file);
                             let loc = Location { file, line, module };
                             if let Some(old) = map.insert(addr, loc.clone()) {
-                                bail!("BUG in DWARF variable filter: index collision for addr 0x{:08x} (old = {:?}, new = {:?})", addr, old, loc);
+                                bail!(
+                                    "BUG in DWARF variable filter: index collision for addr 0x{:08x} (old = {:?}, new = {:?})",
+                                    addr,
+                                    old,
+                                    loc
+                                );
                             }
                         } else {
                             // this symbol was GC-ed by the linker (but remains in the DWARF info),
@@ -176,10 +184,10 @@ where
         let dir_s = dir.to_string_lossy()?;
         let dir = Path::new(&dir_s[..]);
 
-        if !dir.is_absolute() {
-            if let Some(ref comp_dir) = unit.comp_dir {
-                p.push(&comp_dir.to_string_lossy()?[..]);
-            }
+        if !dir.is_absolute()
+            && let Some(ref comp_dir) = unit.comp_dir
+        {
+            p.push(&comp_dir.to_string_lossy()?[..]);
         }
         p.push(dir);
     }

@@ -91,6 +91,8 @@ impl fmt::Debug for Location {
 
 impl Ty {
     /// Returns the size of the type in bytes.
+    // A type always has a size, `is_empty` would make no sense
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         match self {
             Ty::U32 => 4,
@@ -135,13 +137,9 @@ impl CountersBlock {
     }
 
     pub fn values(&self) -> impl Iterator<Item = (&Counter, Value)> {
-        self.values.iter().filter_map(|(addr, value)| {
-            if let Some(counter) = self.entries.get(addr) {
-                Some((counter, *value))
-            } else {
-                None
-            }
-        })
+        self.values
+            .iter()
+            .filter_map(|(addr, value)| self.entries.get(addr).map(|counter| (counter, *value)))
     }
 
     pub fn values_opt(&self) -> impl Iterator<Item = (&Counter, Option<Value>)> {

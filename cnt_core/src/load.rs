@@ -140,7 +140,7 @@ fn collect_counters<'f>(
         }
         raw_symbols.push(symbol_name);
         let symbol_addr = symbol.address();
-        let symbol: anyhow::Result<Symbol, _> = serde_json::from_str(&symbol_name);
+        let symbol: anyhow::Result<Symbol, _> = serde_json::from_str(symbol_name);
         let Ok(symbol) = symbol else {
             continue;
         };

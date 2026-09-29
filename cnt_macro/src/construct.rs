@@ -36,8 +36,8 @@ pub(crate) fn linker_section(
     }
 
     let section = match storage {
-        Storage::RAM => "cnt_ram",
-        Storage::BKP => "cnt_bkp",
+        Storage::Ram => "cnt_ram",
+        Storage::Bkp => "cnt_bkp",
     };
     format!(".{section}{sub_section}")
 }

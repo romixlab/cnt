@@ -117,11 +117,11 @@ pub fn process_cmd(cmd: Command, mut counters: Counters, elf_path: &Path) -> any
             let hint = theme().hint;
             if let Some(block) = counters.ram_counters() {
                 println!("{hint}Resetting RAM counters{hint:#}");
-                reset::reset(&block, &mut core)?;
+                reset::reset(block, &mut core)?;
             }
             if bkp && let Some(block) = counters.bkp_counters() {
                 println!("{hint}Resetting BKP counters{hint:#}");
-                reset::reset(&block, &mut core)?;
+                reset::reset(block, &mut core)?;
             }
         }
         Command::Tui { probe, .. } => {
