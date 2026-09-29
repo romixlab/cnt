@@ -1,12 +1,14 @@
+mod cargo_config;
+mod elf;
 mod list;
+mod probe;
 mod read;
 pub mod reset;
 mod theme;
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::Counters;
-use probe_rs::probe::list::Lister;
-use probe_rs::{Permissions, Session};
+use probe::ProbeOptions;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -37,8 +39,23 @@ impl Cli {
 
 #[derive(Args)]
 pub(crate) struct Elf {
-    /// Path to the firmware ELF file
-    pub elf_path: PathBuf,
+    /// Path to the firmware ELF file. If omitted, the most recently built binary of the cargo project in the current
+    /// directory is used
+    elf_path: Option<PathBuf>,
+}
+
+impl Elf {
+    /// The ELF path given on the command line, or the one found in the current cargo project.
+    pub fn resolve(&self) -> anyhow::Result<PathBuf> {
+        match &self.elf_path {
+            Some(path) => Ok(path.clone()),
+            None => {
+                let path = elf::find_elf()?;
+                eprintln!("Using ELF {}", path.display());
+                Ok(path)
+            }
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -46,42 +63,54 @@ pub(crate) enum Command {
     /// List counters
     List(Elf),
     /// Read counters from a connected target using probe-rs
-    Read(Elf),
-    /// Reset counters to zero on a connected target
-    Reset {
+    Read {
         #[command(flatten)]
         elf: Elf,
+        #[command(flatten)]
+        probe: ProbeOptions,
+    },
+    /// Reset counters to zero on a connected target
+    Reset {
         /// Reset BKP counters as well if they are in use
         #[clap(default_value = "false", long)]
         bkp: bool,
+        #[command(flatten)]
+        elf: Elf,
+        #[command(flatten)]
+        probe: ProbeOptions,
     },
     /// Run terminal UI
-    Tui(Elf),
+    Tui {
+        #[command(flatten)]
+        elf: Elf,
+        #[command(flatten)]
+        probe: ProbeOptions,
+    },
 }
 
 impl Command {
-    pub fn elf_path(&self) -> &Path {
+    pub fn elf(&self) -> &Elf {
         match self {
             Command::List(elf)
-            | Command::Read(elf)
-            | Command::Tui(elf)
-            | Command::Reset { elf, .. } => &elf.elf_path,
+            | Command::Read { elf, .. }
+            | Command::Tui { elf, .. }
+            | Command::Reset { elf, .. } => elf,
         }
     }
 }
 
-pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
+pub fn process_cmd(cmd: Command, mut counters: Counters, elf_path: &Path) -> anyhow::Result<()> {
     match cmd {
         Command::List(_) => {
             list::list(&counters);
         }
-        Command::Read(_) => {
-            let mut session = connect_probe()?;
+        Command::Read { probe, .. } => {
+            let mut session = probe.attach(elf_path)?;
             let core = session.core(0)?;
             read::read(&mut counters, core)?;
         }
-        Command::Reset { bkp, .. } => {
-            let mut session = connect_probe()?;
+        Command::Reset { bkp, probe, .. } => {
+            let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
             if let Some(block) = counters.ram_counters() {
                 println!("Resetting RAM counters");
@@ -92,19 +121,11 @@ pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
                 reset::reset(&block, &mut core)?;
             }
         }
-        Command::Tui(_) => {
-            let mut session = connect_probe()?;
+        Command::Tui { probe, .. } => {
+            let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
             crate::tui::tui(&mut counters, &mut core)?;
         }
     }
     Ok(())
-}
-
-fn connect_probe() -> anyhow::Result<Session> {
-    let lister = Lister::new();
-    let probes = lister.list_all();
-    let probe = probes[0].open()?;
-    let session = probe.attach("STM32H533RE", Permissions::default())?;
-    Ok(session)
 }

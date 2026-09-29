@@ -39,8 +39,14 @@ fn process_packet() {
 * Add `"-C", "link-arg=-Tcnt.x",` to `config.toml`
 * Optionally set `CNT_RAM_BUFFER_SIZE_WORDS` in the `[env]` section as well, default value is 64 words (256 bytes).
 * Flash your firmware and run the CLI tool:
-  * To read once: `cnt_cli read <PATH_TO_ELF>`
-  * Tu run TUI: `cnt_cli tui <PATH_TO_ELF>`
+  * To read once: `cnt read --chip <CHIP> <PATH_TO_ELF>`
+  * To run TUI: `cnt tui --chip <CHIP> <PATH_TO_ELF>`
+  * `<PATH_TO_ELF>` can be omitted when running inside the firmware project, the most recently built binary is used.
+  * Probe and target are selected the same way as in probe-rs: `--chip`, `--probe VID:PID[:SERIAL]`, `--protocol`,
+    `--speed`, `--connect-under-reset`, `--chip-description-path`, or the matching `PROBE_RS_*` environment variables.
+    If multiple probes are connected and `--probe` is not given, you will be asked to pick one.
+  * If `--chip` is not given, it is taken from a `probe-rs run --chip <CHIP>` runner in `.cargo/config.toml`, so usually
+    just `cnt read` or `cnt tui` is enough.
 
 <img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
   
