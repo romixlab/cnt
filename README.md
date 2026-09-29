@@ -39,8 +39,8 @@ fn process_packet() {
 * Add `"-C", "link-arg=-Tcnt.x",` to `config.toml`
 * Optionally set `CNT_RAM_BUFFER_SIZE_WORDS` in the `[env]` section as well, default value is 64 words (256 bytes).
 * Flash your firmware and run the CLI tool:
-  * To read once: `cnt_cli <PATH_TO_ELF> read`
-  * Tu run TUI: `cnt_cli <PATH_TO_ELF> tui`
+  * To read once: `cnt_cli read <PATH_TO_ELF>`
+  * Tu run TUI: `cnt_cli tui <PATH_TO_ELF>`
 
 <img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
   

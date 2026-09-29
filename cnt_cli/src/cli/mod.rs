@@ -3,11 +3,11 @@ mod read;
 pub mod reset;
 mod theme;
 
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::Counters;
 use probe_rs::probe::list::Lister;
 use probe_rs::{Permissions, Session};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(version)]
@@ -17,8 +17,6 @@ use std::path::PathBuf;
     about = "Command line interface for the embedded counters crate. https://crates.io/crates/cnt"
 )]
 pub struct Cli {
-    pub elf_path: PathBuf,
-
     #[command(subcommand)]
     pub command: Command,
 }
@@ -37,33 +35,52 @@ impl Cli {
     }
 }
 
+#[derive(Args)]
+pub(crate) struct Elf {
+    /// Path to the firmware ELF file
+    pub elf_path: PathBuf,
+}
+
 #[derive(Subcommand)]
 pub(crate) enum Command {
     /// List counters
-    List,
+    List(Elf),
     /// Read counters from a connected target using probe-rs
-    Read,
+    Read(Elf),
     /// Reset counters to zero on a connected target
     Reset {
+        #[command(flatten)]
+        elf: Elf,
         /// Reset BKP counters as well if they are in use
         #[clap(default_value = "false", long)]
         bkp: bool,
     },
     /// Run terminal UI
-    Tui,
+    Tui(Elf),
+}
+
+impl Command {
+    pub fn elf_path(&self) -> &Path {
+        match self {
+            Command::List(elf)
+            | Command::Read(elf)
+            | Command::Tui(elf)
+            | Command::Reset { elf, .. } => &elf.elf_path,
+        }
+    }
 }
 
 pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
     match cmd {
-        Command::List => {
+        Command::List(_) => {
             list::list(&counters);
         }
-        Command::Read => {
+        Command::Read(_) => {
             let mut session = connect_probe()?;
             let core = session.core(0)?;
             read::read(&mut counters, core)?;
         }
-        Command::Reset { bkp } => {
+        Command::Reset { bkp, .. } => {
             let mut session = connect_probe()?;
             let mut core = session.core(0)?;
             if let Some(block) = counters.ram_counters() {
@@ -75,7 +92,7 @@ pub fn process_cmd(cmd: Command, mut counters: Counters) -> anyhow::Result<()> {
                 reset::reset(&block, &mut core)?;
             }
         }
-        Command::Tui => {
+        Command::Tui(_) => {
             let mut session = connect_probe()?;
             let mut core = session.core(0)?;
             crate::tui::tui(&mut counters, &mut core)?;
