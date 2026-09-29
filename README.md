@@ -20,20 +20,19 @@ fn high_frequency_irq() {
     let r = do_something();
     cnt::cnt_if!(r.is_err(), unpack_errors: u64);
 }
+
+fn process_packet() {
+    cnt::cnt!(packet_count: u32);
+}
 ```
 
 Under the hood, a simple linker trick is used to obtain a unique ID for each count statement (similar to defmt).
-Then an element of a `_CNT_RAM_BUFFER` is incremented. Updates compile to a plain load, add and store, there are no
-critical sections or atomic read-modify-write instructions involved, so counting is safe in any context, including
-interrupts, and works on cores without atomic support (e.g. Cortex-M0).
+Then an element of a `_CNT_RAM_BUFFER` is incremented. There are no critical sections involved, so counting is safe in
+any context, including interrupts. On cores with atomic read-modify-write instructions (Cortex-M3 and up) counters are
+updated with `ldrex`/`strex`, so a counter shared between thread mode and an interrupt never loses an update; on cores
+without them (Cortex-M0/M0+) a plain load, add and store is used.
 
-`u32` counters are supported as well, and you can pass `true` to count unconditionally:
-
-```rust
-fn process_packet() {
-    cnt::cnt_if!(true, packet_count: u32);
-}
-```
+Library crates can count per instance, see [Instance counters](#instance-counters).
 
 ## How to use
 
@@ -74,29 +73,81 @@ fn main() {
 
 ### Any expression can be used instead of 1
 ```rust
-cnt_if!(true, event_count: u32 += 1 + request.len() as u32);
+cnt!(event_count: u32 += 1 + request.len() as u32);
 ```
 
 ### Severity levels, default is `info`, supported: `error`, `warn`, `info`, `debug`, `trace`
 ```rust
-cnt_if!(true, bytes_lost: u64 += 1, warn);
+cnt!(bytes_lost: u64, warn);
 ```
 
 ### Set group name, useful when there are many counters in use
 ```rust
-cnt_if!(true, bytes_rx: u64 += buf.len(), debug, usart);
+cnt!(bytes_rx: u64 += buf.len() as u64, debug, usart);
 ```
 
 ### Units
 Set unit for better readability, upstream software can then convert from e.g., Bytes to KiB or MiB automatically:
 ```rust
-cnt_if!(true, bytes_rx: u64 "B" += buf.len(), debug, usart);
+cnt!(bytes_rx: u64 "B" += buf.len() as u64, debug, usart);
 ```
+
+### Instance counters
+
+A `cnt!` counter belongs to its call site: if a driver crate is used twice in a firmware, both instances count into the
+same counter. For per-instance counters the driver declares its events as an enum and takes a `&'static Counters<E>`,
+and the firmware decides how many instances there are, what they are called and where they live:
+
+```rust
+// In the driver crate
+#[derive(cnt::Count)]
+pub enum FramerEvent {
+    CrcError,                               // u32, info
+    #[count(warn)]
+    Overrun,
+    #[count(u64, unit = "B", debug)]
+    RxBytes,
+}
+
+pub struct Framer { cnt: &'static cnt::Counters<FramerEvent>, /* ... */ }
+
+impl Framer {
+    pub fn feed(&mut self, byte: u8) {
+        self.cnt.add(FramerEvent::RxBytes, 1);
+        self.cnt.count_if(crc_failed, FramerEvent::CrcError);
+    }
+}
+
+// In the firmware
+static UART1_FRAMER_CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, uart1);
+static RADIO_FRAMER_CNT: cnt::Counters<FramerEvent> = cnt::bkp_counters!(FramerEvent, radio);
+
+let uart1 = Framer::new(&UART1_FRAMER_CNT);
+let radio = Framer::new(&RADIO_FRAMER_CNT);
+```
+
+Host tools show them as `uart1/CrcError`, `radio/CrcError` and so on, with the location of the `counters!` line. The
+counters live in the same `_CNT_RAM_BUFFER`/`_CNT_BKP_BUFFER` as `cnt!` counters, so `counters_ram_buffer()` still
+returns everything. Increments compile to the same code as `cnt!`, the variant is a constant offset from the instance.
+
+### Disabling counters
+
+The `disabled` feature of `cnt` compiles all counters out: the macros expand to nothing (arguments are still
+type-checked, but not evaluated), `Counters<E>` becomes a zero-sized no-op and no buffers exist. A library crate can
+depend on `cnt` unconditionally and let its users opt in, or a firmware can measure the overhead of counting:
+
+```toml
+[dependencies]
+cnt = { version = "0.4", features = ["disabled"] }
+```
+
+`cnt.x` is still generated (empty), so a `-Tcnt.x` link argument keeps working. `cnt::DISABLED` tells at compile time
+whether counters are active.
 
 ### Non-volatile counters
 
-`bkp_cnt_if!` takes the same arguments as `cnt_if!`, but counts into `_CNT_BKP_BUFFER`, which is meant to be placed
-into memory that survives a reset, e.g. backup SRAM. To use it:
+`bkp_cnt!` and `bkp_cnt_if!` take the same arguments as `cnt!` and `cnt_if!`, but count into `_CNT_BKP_BUFFER`, which
+is meant to be placed into memory that survives a reset, e.g. backup SRAM. To use it:
 
 * Set `CNT_BKP_BUFFER_SIZE_WORDS` in the `[env]` section of `.cargo/config.toml`, the default is 0.
 * Add a `BKPSRAM` region to `memory.x`, or set `CNT_BKP_MEMORY_REGION` to the name of an existing region:
@@ -115,15 +166,18 @@ once yourself or with `cnt reset --bkp`. In the TUI, `R` resets BKP counters, `r
 
 ### Limitations
 
-A counter is only ever updated from its own call site, which is what makes lock-free updates safe. If that call site
-runs in several contexts, e.g. a function called from both thread mode and an interrupt, an update may be lost when the
-interrupt preempts another update of the same counter. Counters are for statistics, not for exact accounting across
-contexts.
+On cores without atomic read-modify-write instructions (`target_has_atomic = "32"` not set, e.g. Cortex-M0/M0+) a
+counter updated both from thread mode and from an interrupt may lose an update when the interrupt preempts another
+update of the same counter. On all cores a `u64` counter is two words, so reading it while it is being incremented may
+return a torn value. Counters are for statistics, not for exact accounting.
+
+Instance counters must live in a `static`, as their space is allocated by the linker; dynamically created instances
+have to share one.
 
 ## Low level
 
 If CLI is not available, use `arm-none-eabi-nm` to view the counter indices:
 
 ```shell
-arm-none-eabi-nm ./path/to/elf_fw | grep cnt_ram
+arm-none-eabi-nm ./path/to/elf_fw | grep '"kind":"counter"'
 ```

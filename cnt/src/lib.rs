@@ -1,13 +1,27 @@
 #![no_std]
 
-use crate::consts::{BKP_BUF_SIZE, RAM_BUF_SIZE};
-pub use cnt_macro::{bkp_cnt_if, cnt_if};
-use core::sync::atomic::{AtomicU32, Ordering};
+pub use cnt_macro::{Count, bkp_cnt, bkp_cnt_if, bkp_counters, cnt, cnt_if, counters};
+use core::marker::PhantomData;
 
+#[cfg(not(feature = "disabled"))]
+mod buffers;
+#[cfg(not(feature = "disabled"))]
 mod consts;
+#[cfg(not(feature = "disabled"))]
+pub use buffers::*;
+
+/// With the `disabled` feature all counters are compiled out: the macros expand to nothing (their arguments are still
+/// type-checked, but not evaluated), [`Counters`] is a zero-sized no-op and there are no buffers. Useful for library
+/// crates that want counters to be optional for their users, or to measure the overhead of counting.
+#[cfg(feature = "disabled")]
+pub const DISABLED: bool = true;
+/// See the `disabled` feature.
+#[cfg(not(feature = "disabled"))]
+pub const DISABLED: bool = false;
 
 /// Identifies the buffer layout to host tools: magic followed by the format version (little-endian u16). Bump the
 /// version when the counters encoding changes in an incompatible way.
+#[cfg(not(feature = "disabled"))]
 #[used]
 #[unsafe(no_mangle)]
 #[cfg_attr(target_os = "macos", unsafe(link_section = ".rodata,cnt_signature"))]
@@ -15,151 +29,190 @@ mod consts;
     not(target_os = "macos"),
     unsafe(link_section = ".rodata.cnt_signature")
 )]
-static _CNT_SIGNATURE: [u8; 8] = *b"CNTRS\0\x01\0";
+static _CNT_SIGNATURE: [u8; 8] = *b"CNTRS\0\x02\0";
 
-// The buffers are arrays of atomics rather than `static mut [u32; N]`:
-// - no `&mut` or `&` to the buffer is ever created, so an interrupt updating one counter while another is being
-//   updated is not UB (with a `static mut` even handing out a `&'static [u32]` from `counters_ram_buffer` would be
-//   UB, as the buffer keeps changing behind it).
-// - `Relaxed` loads and stores compile to plain `ldr`/`str` on all Cortex-M cores, including thumbv6m, so there is
-//   no cost compared to non-atomic accesses.
-//
-// Counters are never shared, by design: every cnt macro invocation reserves its own index. It is the address of a
-// `CNT_INDEX` static, one byte per 32-bit word of the counter, placed in a non-allocated (INFO) section starting at 0
-// (see build.rs), so the linker hands out non-repeating indices and a counter is only ever updated from one call site.
-// This is what makes a plain load-add-store (no `fetch_add`, which thumbv6m lacks) correct.
-//
-// Limitation of the current design: one call site can still run in several contexts, e.g. a function containing a
-// cnt macro that is called both from thread mode and from an interrupt. If the interrupt preempts an update of the same
-// counter, its increment is lost. A u64 counter is additionally written as two words, so a preemption between them
-// around a carry into the high word can leave a corrupted value. For the same reason a u64 read by the host, or through
-// `counters_ram_buffer`, may be torn if it is read while being updated.
+/// Where a counter lives.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Storage {
+    /// `_CNT_RAM_BUFFER`, zeroed on reset by the startup code.
+    Ram,
+    /// `_CNT_BKP_BUFFER`, in memory that survives a reset.
+    Bkp,
+}
 
-#[unsafe(no_mangle)]
-static _CNT_RAM_BUFFER: [AtomicU32; RAM_BUF_SIZE] = [const { AtomicU32::new(0) }; RAM_BUF_SIZE];
+/// Numeric type of a counter.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Ty {
+    U32,
+    U64,
+}
 
-/// Non-volatile counters. The buffer must be placed into memory that survives a reset and is not initialized by the
-/// startup code, `cnt.x` puts it into the `BKPSRAM` memory region (or the one given via `CNT_BKP_MEMORY_REGION`) when
-/// `CNT_BKP_BUFFER_SIZE_WORDS` is non-zero.
-#[unsafe(no_mangle)]
-#[cfg_attr(target_os = "macos", unsafe(link_section = ".bss,cnt_bkp_buffer"))]
-#[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".cnt_bkp_buffer"))]
-static _CNT_BKP_BUFFER: [AtomicU32; BKP_BUF_SIZE] = [const { AtomicU32::new(0) }; BKP_BUF_SIZE];
+impl Ty {
+    /// Number of 32-bit words a counter of this type occupies.
+    pub const fn words(self) -> usize {
+        match self {
+            Ty::U32 => 1,
+            Ty::U64 => 2,
+        }
+    }
+}
 
-/// RAM counters, as 32-bit words. u64 counters occupy two words, low word first.
+/// Position of one counter within a [`Count`] type, in 32-bit words.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct Slot {
+    pub word: usize,
+    pub ty: Ty,
+}
+
+/// A set of named counters, implemented by `#[derive(Count)]` on an enum with unit variants.
 ///
-/// Values keep changing while the slice is alive, read them with [`AtomicU32::load`] (`Relaxed` is enough). A u64
-/// counter may be torn if read while it is being incremented.
-#[inline(always)]
-pub fn counters_ram_buffer() -> &'static [AtomicU32] {
-    &_CNT_RAM_BUFFER
-}
-
-/// BKP counters, as 32-bit words. See [`counters_ram_buffer`].
-#[inline(always)]
-pub fn counters_bkp_buffer() -> &'static [AtomicU32] {
-    &_CNT_BKP_BUFFER
-}
-
-/// Add `rhs` to a u32 RAM counter, saturating at the maximum value. Used by the code generated by the cnt macros.
+/// ```no_run
+/// #[derive(cnt::Count)]
+/// enum FramerEvent {
+///     CrcError,                                   // u32, info
+///     #[count(warn)]
+///     Overrun,
+///     #[count(u64, unit = "B", debug)]
+///     RxBytes,
+/// }
+/// ```
 ///
-/// Panics if `counter_idx` is out of bounds, which can only happen if the `cnt.x` linker script is not used, as it
-/// rejects firmware with more counters than the buffer can hold.
-#[inline(always)]
-pub fn saturating_add_u32_ram(counter_idx: usize, rhs: u32) {
-    saturating_add_u32(&_CNT_RAM_BUFFER[counter_idx], rhs);
+/// Variants may be annotated with `#[count(...)]` taking, in any order: `u32` or `u64` (default `u32`), a severity
+/// (`error`, `warn`, `info`, `debug`, `trace`, default `info`) and `unit = "..."`.
+pub trait Count {
+    /// Number of 32-bit words all counters of this type occupy.
+    const WORDS: usize;
+    /// Marker describing the counters to host tools, its address in the `.cnt_layout` section identifies the layout.
+    #[doc(hidden)]
+    const LAYOUT: &'static u8;
+    /// Word offset and type of a counter.
+    fn slot(&self) -> Slot;
 }
 
-/// Add `rhs` to a u32 BKP counter, saturating at the maximum value. Used by the code generated by the cnt macros.
+/// A block of counters of type `E` in the RAM or BKP buffer, created with [`counters!`] or [`bkp_counters!`] in a
+/// `static`. Library code takes a `&'static Counters<E>`, so the firmware decides how many instances there are and
+/// where they live:
 ///
-/// Panics if `counter_idx` is out of bounds, see [`saturating_add_u32_ram`].
-#[inline(always)]
-pub fn saturating_add_u32_bkp(counter_idx: usize, rhs: u32) {
-    saturating_add_u32(&_CNT_BKP_BUFFER[counter_idx], rhs);
-}
-
-/// Add `rhs` to a u64 RAM counter stored at words `counter_idx_lo` and `counter_idx_lo + 1`, saturating at the maximum
-/// value. Used by the code generated by the cnt macros.
+/// ```no_run
+/// # #[derive(cnt::Count)] enum FramerEvent { CrcError }
+/// # struct Framer { cnt: &'static cnt::Counters<FramerEvent> }
+/// # impl Framer { fn feed(&self) { self.cnt.count(FramerEvent::CrcError); } }
+/// static UART1_FRAMER_CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, uart1);
+/// static RADIO_FRAMER_CNT: cnt::Counters<FramerEvent> = cnt::bkp_counters!(FramerEvent, radio);
 ///
-/// Panics if the counter is out of bounds, see [`saturating_add_u32_ram`].
-#[inline(always)]
-pub fn saturating_add_u64_ram(counter_idx_lo: usize, rhs: u64) {
-    saturating_add_u64(&_CNT_RAM_BUFFER[counter_idx_lo..counter_idx_lo + 2], rhs);
+/// let uart1 = Framer { cnt: &UART1_FRAMER_CNT };
+/// let radio = Framer { cnt: &RADIO_FRAMER_CNT };
+/// ```
+pub struct Counters<E: Count> {
+    /// First byte of the marker in the `.counters_ram`/`.counters_bkp` section, its address is the index of the
+    /// first word.
+    #[cfg(not(feature = "disabled"))]
+    slots: &'static u8,
+    storage: Storage,
+    _event: PhantomData<fn(E)>,
 }
 
-/// Add `rhs` to a u64 BKP counter stored at words `counter_idx_lo` and `counter_idx_lo + 1`, saturating at the maximum
-/// value. Used by the code generated by the cnt macros.
-///
-/// Panics if the counter is out of bounds, see [`saturating_add_u32_ram`].
-#[inline(always)]
-pub fn saturating_add_u64_bkp(counter_idx_lo: usize, rhs: u64) {
-    saturating_add_u64(&_CNT_BKP_BUFFER[counter_idx_lo..counter_idx_lo + 2], rhs);
+impl<E: Count> Counters<E> {
+    #[cfg(not(feature = "disabled"))]
+    #[doc(hidden)]
+    pub const fn new(slots: &'static u8, storage: Storage) -> Self {
+        Self {
+            slots,
+            storage,
+            _event: PhantomData,
+        }
+    }
+
+    /// Counters that count nothing, what [`counters!`] expands to with the `disabled` feature.
+    #[cfg(feature = "disabled")]
+    #[doc(hidden)]
+    pub const fn disabled(storage: Storage) -> Self {
+        Self {
+            storage,
+            _event: PhantomData,
+        }
+    }
+
+    /// Where the counters are stored.
+    pub const fn storage(&self) -> Storage {
+        self.storage
+    }
+
+    /// Add 1 to a counter.
+    #[inline(always)]
+    pub fn count(&self, event: E) {
+        self.add(event, 1);
+    }
+
+    /// Add 1 to a counter if `condition` is true.
+    #[inline(always)]
+    pub fn count_if(&self, condition: bool, event: E) {
+        if condition {
+            self.add(event, 1);
+        }
+    }
+
+    /// Add `rhs` to a counter, saturating at the maximum value of the counter's type.
+    #[cfg(feature = "disabled")]
+    #[inline(always)]
+    pub fn add(&self, event: E, rhs: u64) {
+        let _ = (event, rhs);
+    }
+
+    /// Add `rhs` to a counter, saturating at the maximum value of the counter's type.
+    #[cfg(not(feature = "disabled"))]
+    #[inline(always)]
+    pub fn add(&self, event: E, rhs: u64) {
+        // The static holding `self` is immutable, so `storage` and `slot` fold to constants after inlining
+        let Slot { word, ty } = event.slot();
+        let idx = self.slots as *const u8 as usize + word;
+        match (self.storage, ty) {
+            (Storage::Ram, Ty::U32) => saturating_add_u32_ram(idx, saturate_u32(rhs)),
+            (Storage::Bkp, Ty::U32) => saturating_add_u32_bkp(idx, saturate_u32(rhs)),
+            (Storage::Ram, Ty::U64) => saturating_add_u64_ram(idx, rhs),
+            (Storage::Bkp, Ty::U64) => saturating_add_u64_bkp(idx, rhs),
+        }
+    }
 }
 
+#[cfg(not(feature = "disabled"))]
 #[inline(always)]
-fn saturating_add_u32(counter: &AtomicU32, rhs: u32) {
-    counter.store(
-        counter.load(Ordering::Relaxed).saturating_add(rhs),
-        Ordering::Relaxed,
-    );
+const fn saturate_u32(v: u64) -> u32 {
+    if v > u32::MAX as u64 {
+        u32::MAX
+    } else {
+        v as u32
+    }
 }
 
-/// Add `rhs` to the u64 stored in `words` as two 32-bit words, low word first.
-///
-/// The buffers are only 4-byte aligned, so a u64 counter is accessed as two u32 words instead of through an
-/// (unaligned) `u64`. This also avoids byte-wise unaligned accesses on cores without unaligned access support.
-#[inline(always)]
-fn saturating_add_u64(words: &[AtomicU32], rhs: u64) {
-    let [lo, hi] = words else { unreachable!() };
-    let value = (u64::from(hi.load(Ordering::Relaxed)) << 32
-        | u64::from(lo.load(Ordering::Relaxed)))
-    .saturating_add(rhs);
-    lo.store(value as u32, Ordering::Relaxed);
-    hi.store((value >> 32) as u32, Ordering::Relaxed);
+/// Emitted by [`counters!`] into the `.cnt_instance` section, ties an instance to the layout of its counters. Both
+/// fields are resolved by the linker to addresses in INFO sections placed at 0, i.e. the counter index and layout id.
+#[doc(hidden)]
+#[repr(C)]
+pub struct InstanceInfo {
+    pub slots: *const u8,
+    pub layout: *const u8,
 }
 
-#[cfg(test)]
+// The pointers are only ever read by host tools from the ELF
+unsafe impl Sync for InstanceInfo {}
+
+#[cfg(all(test, not(feature = "disabled")))]
 mod tests {
     use super::*;
 
-    fn words(counter: &[AtomicU32]) -> [u32; 2] {
-        [
-            counter[0].load(Ordering::Relaxed),
-            counter[1].load(Ordering::Relaxed),
-        ]
-    }
-
     #[test]
-    fn u64_carries_into_high_word() {
-        let counter = [AtomicU32::new(u32::MAX), AtomicU32::new(0)];
-        saturating_add_u64(&counter, 1);
-        assert_eq!(words(&counter), [0, 1]);
-        saturating_add_u64(&counter, 0x1_0000_0002);
-        assert_eq!(words(&counter), [2, 2]);
-    }
-
-    #[test]
-    fn u64_saturates() {
-        let counter = [AtomicU32::new(u32::MAX - 1), AtomicU32::new(u32::MAX)];
-        saturating_add_u64(&counter, 5);
-        assert_eq!(words(&counter), [u32::MAX, u32::MAX]);
-    }
-
-    #[test]
-    fn u32_saturates() {
-        let counter = AtomicU32::new(u32::MAX - 1);
-        saturating_add_u32(&counter, 5);
-        assert_eq!(counter.load(Ordering::Relaxed), u32::MAX);
-    }
-
-    #[test]
-    #[should_panic]
-    fn u64_out_of_bounds_panics() {
-        saturating_add_u64_ram(RAM_BUF_SIZE - 1, 1);
+    fn saturate_to_u32() {
+        assert_eq!(saturate_u32(5), 5);
+        assert_eq!(saturate_u32(1 << 40), u32::MAX);
     }
 
     #[test]
     fn signature() {
-        assert_eq!(&_CNT_SIGNATURE[..5], b"CNTRS");
+        assert_eq!(&_CNT_SIGNATURE[..6], b"CNTRS\0");
+        assert_eq!(
+            u16::from_le_bytes([_CNT_SIGNATURE[6], _CNT_SIGNATURE[7]]),
+            2
+        );
     }
 }

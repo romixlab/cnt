@@ -26,13 +26,12 @@ fn list_entries(cnt: &CountersBlock) {
     let t = theme();
     print_header(cnt);
     let width = name_width(cnt);
-    let mut total_size = 0;
     for c in cnt.entries().values() {
         let hint = t.hint;
         print!(
             "{hint}{}{hint:#} {:width$}",
             severity_label(c.severity),
-            c.name
+            c.qualified_name()
         );
         print!(" {hint}{}{hint:#}", c.ty);
         if !c.unit.is_empty() {
@@ -40,9 +39,8 @@ fn list_entries(cnt: &CountersBlock) {
         }
         println!();
         print_location(c);
-        total_size += c.ty.len() as u64;
     }
-    print_usage(cnt, total_size);
+    print_usage(cnt, cnt.used_bytes());
 }
 
 /// `📍 RAM counters` followed by the buffer address and size.
@@ -61,7 +59,7 @@ pub(super) fn print_header(cnt: &CountersBlock) {
 pub(super) fn name_width(cnt: &CountersBlock) -> usize {
     cnt.entries()
         .values()
-        .map(|c| c.name.len())
+        .map(|c| c.qualified_name().len())
         .max()
         .unwrap_or(0)
 }
@@ -77,23 +75,15 @@ pub(crate) fn severity_label(severity: Severity) -> &'static str {
     }
 }
 
-/// defmt-style location line: `└─ module @ file:line`.
+/// defmt-style location line: `└─ crate [Layout] @ file:line`.
 pub(super) fn print_location(c: &Counter) {
     let t = theme();
     let (hint, path) = (t.hint, t.path);
-    let Some(location) = &c.location else {
-        println!("{hint}└─ <unknown location>{hint:#}");
-        return;
-    };
-    print!("{hint}└─ ");
-    if !location.module.is_empty() {
-        print!("{} @ ", location.module);
+    print!("{hint}└─ {}", c.crate_name);
+    if let Some(layout) = &c.layout {
+        print!(" {layout}");
     }
-    println!(
-        "{hint:#}{path}{}:{}{path:#}",
-        location.file.display(),
-        location.line
-    );
+    println!(" @ {hint:#}{path}{}{path:#}", c.location);
 }
 
 /// Total and free space in the buffer, with a warning when it is (nearly) full.

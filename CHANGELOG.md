@@ -6,7 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). All crates in the workspace (`cnt`, `cnt_macro`, `cnt_core`,
 `cnt_cli`) share one version.
 
-## [Unreleased]
+## [0.4.0] - 2026-09-29
+
+### Breaking changes
+
+- Counter format version 2: `cnt_cli` 0.4 requires firmware built with `cnt` 0.4, and vice versa.
+- Locations come from the macro call site (`proc_macro::Span::file`/`line`, Rust 1.88+) instead of DWARF: `cnt_core`
+  no longer depends on `gimli`, `Location` is `{ file: Arc<String>, line }` (the compiler's view of the path, e.g.
+  relative to the workspace), there is no module path and no `<unknown location>`.
+- `cnt_core`: `Counter::buf` replaced by `idx` (word index) and `addr`; `Ty::len()` (bytes) replaced by `bytes()` and
+  `words()`; `Storage::RAM`/`BKP` renamed to `Ram`/`Bkp`; `Counter::location` is not optional; `Counter::layout` and
+  `Counter::qualified_name()` added; `CountersBlock::used_bytes()` and `Counters::blocks()` added.
+- Marker symbol names are JSON objects with a `kind` member, `storage` is `ram`/`bkp`, `crate_name` renamed to `crate`.
+
+### Added
+
+- `cnt!` and `bkp_cnt!` count unconditionally, without a `true` argument: `cnt!(packet_count: u32)`.
+- Instance counters: `#[derive(cnt::Count)]` on an enum with `#[count(u64, unit = "B", warn)]` variant attributes,
+  `cnt::counters!(Type, name)`/`cnt::bkp_counters!(Type, name)` in a `static`, and `Counters<E>::count`, `count_if`,
+  `add`. A library taking `&'static Counters<E>` gets separate counters per instance, named by the firmware.
+- On cores with `target_has_atomic = "32"` (Cortex-M3 and up) counters are updated with `fetch_add`/`fetch_update`,
+  so an update preempted by an interrupt updating the same counter is retried instead of lost. Cores without (thumbv6m)
+  keep the plain load-add-store.
+- `disabled` feature of `cnt`: macros expand to nothing, `Counters<E>` is a zero-sized no-op, no buffers or marker
+  sections are emitted and `cnt.x` is empty. `cnt::DISABLED` constant.
+- Counter markers are `#[used]`, a `cnt_if!` whose condition is optimized out still appears in host tools.
+- `cnt_cli` shows counters as `group/name` and instance counters as `instance/Variant`, with the crate and `Count` type
+  in the location line.
+
+### Fixed
+
+- The disambiguator of otherwise identical invocations includes the call site's file, line and column, instead of
+  relying solely on the unstable `Debug` output of `Span`.
 
 ## [0.3.0] - 2026-09-29
 

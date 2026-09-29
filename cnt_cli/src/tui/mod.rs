@@ -12,7 +12,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, HighlightSpacing, Row, Table, TableState};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How often counters are read from the target.
@@ -69,8 +68,6 @@ struct App<'a> {
     status: Option<Status>,
     /// Last failed read, cleared on the next successful one
     read_error: Option<String>,
-    /// Locations are shown relative to this directory
-    cwd: Option<PathBuf>,
 }
 
 enum Status {
@@ -93,7 +90,6 @@ impl<'a> App<'a> {
             changed: HashMap::new(),
             status: None,
             read_error: None,
-            cwd: std::env::current_dir().ok(),
         }
     }
 
@@ -109,9 +105,9 @@ impl<'a> App<'a> {
             KeyCode::PageUp => state.scroll_up_by(10),
             KeyCode::Char('g') | KeyCode::Home => state.select_first(),
             KeyCode::Char('G') | KeyCode::End => state.select_last(),
-            KeyCode::Char('r') => self.reset(Storage::RAM, core),
+            KeyCode::Char('r') => self.reset(Storage::Ram, core),
             // Separate key, as BKP counters are meant to survive resets and power loss
-            KeyCode::Char('R') => self.reset(Storage::BKP, core),
+            KeyCode::Char('R') => self.reset(Storage::Bkp, core),
             _ => {}
         }
         true
@@ -199,7 +195,7 @@ impl<'a> App<'a> {
             .panels
             .iter()
             .flat_map(|p| p.counters.entries().values())
-            .map(|c| c.name.len())
+            .map(|c| c.qualified_name().len())
             .max()
             .unwrap_or(0) as u16;
         let now = Instant::now();
@@ -209,7 +205,6 @@ impl<'a> App<'a> {
                 name_width,
                 changed: &self.changed,
                 now,
-                cwd: self.cwd.as_deref(),
             };
             view.render(frame, *area, panel);
         }
@@ -232,7 +227,6 @@ struct PanelView<'a> {
     name_width: u16,
     changed: &'a HashMap<u64, Instant>,
     now: Instant,
-    cwd: Option<&'a Path>,
 }
 
 impl PanelView<'_> {
@@ -242,7 +236,7 @@ impl PanelView<'_> {
         let counters = &*panel.counters;
 
         let buffer = counters.buffer();
-        let used: u64 = counters.entries().values().map(|c| c.ty.len() as u64).sum();
+        let used = counters.used_bytes();
         let title = Line::from_iter([
             Span::raw(" 📍 "),
             Span::styled(
@@ -312,7 +306,7 @@ impl PanelView<'_> {
         };
         let recently_changed = self
             .changed
-            .get(&cnt.buf.addr)
+            .get(&cnt.addr)
             .is_some_and(|at| self.now.duration_since(*at) < CHANGE_HIGHLIGHT);
         let value_style = if recently_changed {
             style.add_modifier(Modifier::REVERSED)
@@ -327,34 +321,31 @@ impl PanelView<'_> {
                 severity_label(cnt.severity)
             ))
             .style(style),
-            Cell::new(cnt.name.as_str()),
+            Cell::new(cnt.qualified_name()),
             Cell::new(Line::styled(format_value(value, &cnt.unit), value_style).right_aligned()),
             Cell::new(cnt.ty.to_string()).style(hint),
             Cell::new(self.location(cnt, location_width)),
         ])
     }
 
-    /// defmt-style location: `module @ file:line`, with the file relative to the current directory if possible.
+    /// defmt-style location: `crate [Layout] @ file:line`.
     ///
-    /// If it does not fit in `width`, the module and then the file are shortened from the left, so that the most
+    /// If it does not fit in `width`, the crate and then the file are shortened from the left, so that the most
     /// specific part and the line number stay visible.
     fn location(&self, cnt: &Counter, width: usize) -> Line<'static> {
         let t = theme();
         let hint = Style::from(t.hint);
-        let Some(location) = &cnt.location else {
-            return Line::styled("<unknown location>", hint);
-        };
-        let file = self
-            .cwd
-            .and_then(|cwd| location.file.strip_prefix(cwd).ok())
-            .unwrap_or(&location.file);
-        let file = truncate_left(&format!("{}:{}", file.display(), location.line), width);
+        let file = truncate_left(&cnt.location.to_string(), width);
         let mut spans = vec![];
-        let module_width = width.saturating_sub(file.chars().count() + " @ ".len());
-        // A few characters of a module path are just noise
-        if !location.module.is_empty() && module_width >= 8 {
-            let module = truncate_left(&location.module, module_width);
-            spans.push(Span::styled(format!("{module} @ "), hint));
+        let origin = match &cnt.layout {
+            Some(layout) => format!("{} {layout}", cnt.crate_name),
+            None => cnt.crate_name.to_string(),
+        };
+        let origin_width = width.saturating_sub(file.chars().count() + " @ ".len());
+        // A few characters of a crate name are just noise
+        if origin_width >= 8 {
+            let origin = truncate_left(&origin, origin_width);
+            spans.push(Span::styled(format!("{origin} @ "), hint));
         }
         spans.push(Span::styled(file, Style::from(t.path)));
         Line::from(spans)
@@ -383,7 +374,7 @@ fn read_block(
 ) -> anyhow::Result<()> {
     let previous: HashMap<u64, u64> = counters
         .values()
-        .map(|(c, v)| (c.buf.addr, v.to_u64()))
+        .map(|(c, v)| (c.addr, v.to_u64()))
         .collect();
 
     let mut data = vec![0u8; counters.buffer().size as usize];
@@ -393,8 +384,8 @@ fn read_block(
     for (c, v) in counters.values() {
         let v = v.to_u64();
         // Resets are not interesting, only counters firing
-        if v != 0 && previous.get(&c.buf.addr).is_some_and(|p| *p != v) {
-            changed.insert(c.buf.addr, now);
+        if v != 0 && previous.get(&c.addr).is_some_and(|p| *p != v) {
+            changed.insert(c.addr, now);
         }
     }
     Ok(())

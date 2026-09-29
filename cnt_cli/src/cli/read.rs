@@ -48,7 +48,7 @@ fn read_counters(counters: &mut CountersBlock, core: &mut Core) -> anyhow::Resul
         println!(
             "{style}{}{style:#} {:width$} {style}{value}{unit}{style:#}",
             severity_label(cnt.severity),
-            cnt.name,
+            cnt.qualified_name(),
         );
         print_location(cnt);
     }

@@ -3,13 +3,13 @@ name = "cnt_core"
 description = "Host data types and ELF parsing for the embedded counters crate - cnt"
 authors.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gimli = "0.34.0"
 object = "0.40.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

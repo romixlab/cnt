@@ -3,9 +3,15 @@ name = "cnt"
 description = "RAM counters macro for microcontrollers, when logging is not an option"
 authors.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
 cnt_macro.workspace = true
+
+[features]
+# Compile all counters out: macros expand to nothing (arguments are type-checked but not evaluated), `Counters<E>` is a
+# zero-sized no-op and no buffers exist. `cnt.x` is still generated, empty, so `-Tcnt.x` keeps linking.
+disabled = ["cnt_macro/disabled"]
