@@ -5,7 +5,8 @@ pub struct ExprAndNameArgs {
     pub name: Ident,
     pub ty: Ident,
     pub unit: Option<LitStr>,
-    pub rhs: Expr,
+    /// Value to add, 1 if omitted.
+    pub rhs: Option<Expr>,
     pub severity: Option<Ident>,
     pub group: Option<Ident>,
 }
@@ -25,10 +26,21 @@ impl Parse for ExprAndNameArgs {
             None
         };
 
-        let _inc = input.parse::<Token![+=]>()?;
-        let rhs = input.parse()?;
+        let rhs = if input.peek(Token![+=]) {
+            input.parse::<Token![+=]>()?;
+            Some(input.parse()?)
+        } else {
+            None
+        };
         let severity = parse_optional_ident(input)?;
         let group = parse_optional_ident(input)?;
+        // Trailing comma
+        if input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+        }
+        if !input.is_empty() {
+            return Err(input.error("unexpected token, expected `+= <expr>`, `, <severity>`, `, <group>` or end of input"));
+        }
         Ok(Self {
             condition,
             name,
@@ -42,7 +54,7 @@ impl Parse for ExprAndNameArgs {
 }
 
 fn parse_optional_ident(input: syn::parse::ParseStream) -> syn::Result<Option<Ident>> {
-    if input.peek(Token![,]) {
+    if input.peek(Token![,]) && input.peek2(Ident) {
         input.parse::<Token![,]>()?;
         Ok(Some(input.parse()?))
     } else {

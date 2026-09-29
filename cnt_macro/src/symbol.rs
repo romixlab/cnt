@@ -56,6 +56,16 @@ pub(crate) enum Ty {
     U64,
 }
 
+impl Ty {
+    /// Number of 32-bit words a counter of this type occupies.
+    pub(crate) fn words(self) -> usize {
+        match self {
+            Ty::U32 => 1,
+            Ty::U64 => 2,
+        }
+    }
+}
+
 /// Severity of a counter. Currently supported values: error, warn, info, debug, trace
 #[derive(Copy, Clone)]
 pub(crate) enum Severity {
@@ -129,7 +139,7 @@ impl Storage {
 }
 
 impl Ty {
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Ty::U32 => "u32",
             Ty::U64 => "u64",

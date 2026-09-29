@@ -156,7 +156,7 @@ fn select_probe(probes: &[DebugProbeInfo]) -> anyhow::Result<&DebugProbeInfo> {
     eprintln!("{hint}Available probes:{hint:#}\n{list}");
     let stdin = std::io::stdin();
     loop {
-        eprint!("Select probe (0-{}): ", probes.len() - 1);
+        anstream::eprint!("Select probe (0-{}): ", probes.len() - 1);
         std::io::stderr().flush()?;
         let mut line = String::new();
         if stdin.lock().read_line(&mut line)? == 0 {

@@ -7,16 +7,17 @@ mod symbol;
 
 /// Increment RAM counter if expression evaluates to true. RAM counters are reset to zero on firmware restart (by startup code).
 ///
-/// Counters buffer size is controlled through the `CNT_RAM_BUFFER_SIZE_WORDS` env variable.
-/// cnt cli tool checks that the actual number of counters used does not overflow the buffer, if you don't use
-/// the tool, then you can check manually, for example, by inspecting cargo nm output.
+/// Counters buffer size is controlled through the `CNT_RAM_BUFFER_SIZE_WORDS` env variable. The `cnt.x` linker
+/// script fails the link if there are more counters than the buffer can hold.
+///
+/// The generated code refers to the `cnt` crate by that name, so it must not be renamed in `Cargo.toml`.
 ///
 /// Examples are `no_run`: counter indices come from the `cnt.x` linker script, so they are only valid in firmware.
 ///
 /// Create and increment a counter named `blink_count` every time this line is executed:
 /// ```no_run
 /// # use cnt::cnt_if;
-/// cnt_if!(true, blink_count: u32 += 1); // increment unconditionally
+/// cnt_if!(true, blink_count: u32); // increment unconditionally, `+= 1` is implied
 /// ```
 ///
 /// Increment only when there is an error:
@@ -69,9 +70,11 @@ pub fn cnt_if(args: TokenStream) -> TokenStream {
 /// Increment non-volatile counter if expression evaluates to true. Non-volatile counters buffer is supposed to be placed into
 /// BKPRAM memory, or into RCC or TAMP registers, that do not lose contents on reset (provided there is a battery connected).
 ///
-/// Counters buffer size is controlled through CNT_BKP_BUFFER_SIZE_WORDS env variable (default is 0).
-/// bedrock cli tool checks that actual number of counters used to dot overflow the buffer, if you don't use
-/// the tool, then you can check manually, for example, by inspecting cargo nm output.
+/// Counters buffer size is controlled through the `CNT_BKP_BUFFER_SIZE_WORDS` env variable (default is 0), the memory
+/// region the buffer is placed in through `CNT_BKP_MEMORY_REGION` (default: `BKPSRAM`). The `cnt.x` linker script
+/// fails the link if there are more counters than the buffer can hold.
+///
+/// Arguments are the same as for [`cnt_if!`].
 #[proc_macro]
 pub fn bkp_cnt_if(args: TokenStream) -> TokenStream {
     match cnt_if::bkp_cnt_if(args.into()) {

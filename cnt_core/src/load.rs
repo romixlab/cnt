@@ -10,8 +10,8 @@ impl Counters {
     pub fn load_elf(path: &Path) -> anyhow::Result<Self> {
         let elf_bytes = std::fs::read(path)?;
         let elf = File::parse(elf_bytes.as_slice())?;
-        let ram_section_idx = elf.section_by_name(".counters_ram").map(|s| s.index());
-        let bkp_section_idx = elf.section_by_name(".counters_bkp").map(|s| s.index());
+        let ram_section_idx = counters_section(&elf, ".counters_ram")?;
+        let bkp_section_idx = counters_section(&elf, ".counters_bkp")?;
         if ram_section_idx.is_none() && bkp_section_idx.is_none() {
             return Err(anyhow!(
                 "No .counters_ram or .counters_bkp section found, cnt crate or cnt.x linker script is not used"
@@ -20,25 +20,23 @@ impl Counters {
 
         let mut ram_buffer = None;
         let mut bkp_buffer = None;
+        let mut signature = None;
         for symbol in elf.symbols() {
             let Ok(symbol_name) = symbol.name() else {
                 continue;
             };
-            if symbol_name == "_CNT_RAM_BUFFER" {
-                ram_buffer = Some(Buffer {
-                    addr: symbol.address(),
-                    size: symbol.size(),
-                });
-                continue;
-            }
-            if symbol_name == "_CNT_BKP_BUFFER" {
-                bkp_buffer = Some(Buffer {
-                    addr: symbol.address(),
-                    size: symbol.size(),
-                });
-                continue;
+            let buffer = Buffer {
+                addr: symbol.address(),
+                size: symbol.size(),
+            };
+            match symbol_name {
+                "_CNT_RAM_BUFFER" => ram_buffer = Some(buffer),
+                "_CNT_BKP_BUFFER" => bkp_buffer = Some(buffer),
+                "_CNT_SIGNATURE" => signature = Some(symbol),
+                _ => {}
             }
         }
+        check_signature(&elf, signature)?;
 
         let mut raw_symbols_ram = vec![];
         let mut dedup_str = vec![];
@@ -55,7 +53,7 @@ impl Counters {
                     "No _CNT_RAM_BUFFER symbol found, cnt crate or cnt.x linker script is not used"
                 ));
             };
-            fill_addresses(&mut ram_counters, ram_buffer);
+            fill_addresses(&mut ram_counters, ram_buffer, Storage::RAM)?;
             Some(CountersBlock {
                 entries: ram_counters,
                 buffer: ram_buffer,
@@ -80,7 +78,7 @@ impl Counters {
                     "No _CNT_BKP_BUFFER symbol found, cnt crate or cnt.x linker script is not used"
                 ));
             };
-            fill_addresses(&mut bkp_counters, bkp_buffer);
+            fill_addresses(&mut bkp_counters, bkp_buffer, Storage::BKP)?;
             Some(CountersBlock {
                 entries: bkp_counters,
                 buffer: bkp_buffer,
@@ -181,14 +179,86 @@ fn fill_locations(counters: &mut BTreeMap<u64, Counter>, locations: BTreeMap<u64
     }
 }
 
-fn fill_addresses(counters: &mut BTreeMap<u64, Counter>, buffer: Buffer) {
+/// Index of the `.counters_ram`/`.counters_bkp` section, if present. Counter indices are symbol addresses in this
+/// section, which only works if the linker script placed it at address 0.
+fn counters_section(elf: &File, name: &str) -> anyhow::Result<Option<SectionIndex>> {
+    let Some(section) = elf.section_by_name(name) else {
+        return Ok(None);
+    };
+    if section.address() != 0 {
+        return Err(anyhow!(
+            "Section {name} is at 0x{:08x} instead of 0, is the cnt.x linker script used unmodified?",
+            section.address()
+        ));
+    }
+    Ok(Some(section.index()))
+}
+
+/// Format version understood by this crate, see `_CNT_SIGNATURE` in the `cnt` crate.
+const SIGNATURE_MAGIC: &[u8] = b"CNTRS\0";
+const SIGNATURE_VERSION: u16 = 1;
+
+/// Verify that the firmware uses a compatible version of the `cnt` crate. Firmware built with cnt 0.2.0 has an
+/// all-zero signature, which is accepted as well.
+fn check_signature(elf: &File, symbol: Option<object::Symbol>) -> anyhow::Result<()> {
+    let Some(symbol) = symbol else {
+        return Err(anyhow!(
+            "No _CNT_SIGNATURE symbol found, cnt crate is not used"
+        ));
+    };
+    let Some(section_idx) = symbol.section_index() else {
+        return Ok(());
+    };
+    let section = elf.section_by_index(section_idx)?;
+    let Ok(Some(bytes)) = section.data_range(symbol.address(), symbol.size()) else {
+        return Ok(());
+    };
+    if bytes.iter().all(|b| *b == 0) {
+        return Ok(());
+    }
+    if !bytes.starts_with(SIGNATURE_MAGIC) || bytes.len() < SIGNATURE_MAGIC.len() + 2 {
+        return Err(anyhow!("Invalid _CNT_SIGNATURE: {bytes:02x?}"));
+    }
+    let version = u16::from_le_bytes([
+        bytes[SIGNATURE_MAGIC.len()],
+        bytes[SIGNATURE_MAGIC.len() + 1],
+    ]);
+    if version != SIGNATURE_VERSION {
+        return Err(anyhow!(
+            "Firmware uses cnt format version {version}, this tool supports version {SIGNATURE_VERSION}, update cnt or the cnt CLI"
+        ));
+    }
+    Ok(())
+}
+
+/// Compute the target address of each counter from its index and check that it fits into the buffer.
+fn fill_addresses(
+    counters: &mut BTreeMap<u64, Counter>,
+    buffer: Buffer,
+    storage: Storage,
+) -> anyhow::Result<()> {
+    let mut overflowing = vec![];
     for (idx, counter) in counters.iter_mut() {
-        // Indices are in 32-bit words, see `CountersBlock::read_values`
+        // Indices are in 32-bit words
+        let size = counter.ty.len() as u64;
+        let offset = idx * 4;
+        if offset + size > buffer.size {
+            overflowing.push(counter.name.clone());
+        }
         counter.buf = Buffer {
-            addr: buffer.addr + idx * 4,
-            size: counter.ty.len() as u64,
+            addr: buffer.addr + offset,
+            size,
         };
     }
+    if !overflowing.is_empty() {
+        let used: u64 = counters.values().map(|c| c.ty.len() as u64).sum();
+        return Err(anyhow!(
+            "{storage} counters do not fit into the buffer of {} B ({used} B needed), increase CNT_{storage}_BUFFER_SIZE_WORDS. Outside of the buffer: {}",
+            buffer.size,
+            overflowing.join(", ")
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn dedup<T: PartialEq>(seen: &mut Vec<Arc<T>>, current: T) -> Arc<T> {

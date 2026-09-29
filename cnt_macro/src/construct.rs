@@ -49,8 +49,8 @@ pub(crate) fn static_variable(
     ty: Ty,
     unit: &str,
     severity: Severity,
-    words: usize,
 ) -> TokenStream2 {
+    let words = ty.words();
     let sym_name = crate::symbol::mangled(group, storage, name, ty, unit, severity);
     let section = linker_section(storage, false, None, &sym_name);
     let section_for_macos = linker_section(storage, true, None, &sym_name);
@@ -60,7 +60,8 @@ pub(crate) fn static_variable(
         #[cfg_attr(not(target_os = "macos"), unsafe(link_section = #section))]
         #[unsafe(export_name = #sym_name)]
         static CNT_INDEX: [u8; #words] = [0; #words];
-        &CNT_INDEX as *const u8 as usize
+        // The section is placed at address 0 by cnt.x, so the address is the index of the counter's first word.
+        CNT_INDEX.as_ptr() as usize
     })
 }
 

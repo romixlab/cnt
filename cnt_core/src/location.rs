@@ -1,7 +1,7 @@
 //! Borrowed from defmt
 use crate::Location;
 use crate::load::dedup;
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{bail, ensure};
 use gimli::DebuggingInformationEntry;
 use object::{File, Object, ObjectSection};
 use std::borrow::Cow;
@@ -49,7 +49,10 @@ pub(crate) fn get_locations(
 
         let mut cursor = header.entries(&abbrev);
 
-        ensure!(cursor.next_dfs()?.is_some(), "empty DWARF?");
+        if cursor.next_dfs()?.is_none() {
+            // Empty compilation unit, nothing to look for
+            continue;
+        }
 
         // Enclosing namespaces of the current entry, with their (absolute) tree depth
         let mut segments: Vec<(isize, String)> = vec![];
@@ -63,97 +66,112 @@ pub(crate) fn get_locations(
                 segments.pop();
             }
 
-            // here start the custom logic
             if entry.tag() == gimli::constants::DW_TAG_namespace {
                 if let Some(name) = entry.attr_value(gimli::constants::DW_AT_name) {
                     let name = dwarf.attr_string(&unit, name)?;
                     segments.push((entry.depth(), name.to_string_lossy().into_owned()));
                 }
             } else if entry.tag() == gimli::constants::DW_TAG_variable {
-                // what we are after
-                let mut decl_file = None;
-                let mut decl_line = None; // line number
-                let mut name = None;
-                let mut linkage_name = None;
-                let mut location = None;
+                // Locations are best-effort: a counter without one is still listed, so a single odd DIE must not
+                // fail the whole ELF
+                let Some((addr, file, line)) =
+                    cnt_index_variable(entry, &unit, &dwarf, filter_symbols)?
+                else {
+                    continue;
+                };
+                let module = segments
+                    .iter()
+                    .map(|(_, name)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("::");
 
-                // Iterate over the attributes in the DIE.
-                for attr in entry.attrs() {
-                    match attr.name() {
-                        gimli::constants::DW_AT_name => {
-                            if let gimli::AttributeValue::DebugStrRef(off) = attr.value() {
-                                name = Some(off);
-                            }
-                        }
-                        gimli::constants::DW_AT_decl_file => {
-                            if let gimli::AttributeValue::FileIndex(idx) = attr.value() {
-                                decl_file = Some(idx);
-                            }
-                        }
-                        gimli::constants::DW_AT_decl_line => {
-                            if let gimli::AttributeValue::Udata(line) = attr.value() {
-                                decl_line = Some(line);
-                            }
-                        }
-                        gimli::constants::DW_AT_location => {
-                            if let gimli::AttributeValue::Exprloc(loc) = attr.value() {
-                                location = Some(loc);
-                            }
-                        }
-                        gimli::constants::DW_AT_linkage_name => {
-                            if let gimli::AttributeValue::DebugStrRef(off) = attr.value() {
-                                linkage_name = Some(off);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                if let (
-                    Some(name_index),
-                    Some(linkage_name_index),
-                    Some(file_index),
-                    Some(line),
-                    Some(loc),
-                ) = (name, linkage_name, decl_file, decl_line, location)
-                {
-                    let name_slice = dwarf.string(name_index)?;
-                    let name = core::str::from_utf8(&name_slice)?;
-                    let linkage_name_slice = dwarf.string(linkage_name_index)?;
-                    let linkage_name = core::str::from_utf8(&linkage_name_slice)?;
-
-                    if name == "CNT_INDEX" {
-                        if filter_symbols.contains(&linkage_name) {
-                            let addr = exprloc2address(unit.encoding(), &loc)?;
-                            let file = file_index_to_path(file_index, &unit, &dwarf)?;
-                            let module = segments
-                                .iter()
-                                .map(|(_, name)| name.as_str())
-                                .collect::<Vec<_>>()
-                                .join("::");
-
-                            let module = dedup(&mut dedup_str, module);
-                            let file = dedup(&mut dedup_path, file);
-                            let loc = Location { file, line, module };
-                            if let Some(old) = map.insert(addr, loc.clone()) {
-                                bail!(
-                                    "BUG in DWARF variable filter: index collision for addr 0x{:08x} (old = {:?}, new = {:?})",
-                                    addr,
-                                    old,
-                                    loc
-                                );
-                            }
-                        } else {
-                            // this symbol was GC-ed by the linker (but remains in the DWARF info),
-                            // so we discard it (its `addr` info is also wrong which causes collisions)
-                        }
-                    }
+                let module = dedup(&mut dedup_str, module);
+                let file = dedup(&mut dedup_path, file);
+                let loc = Location { file, line, module };
+                if let Some(old) = map.insert(addr, loc.clone()) {
+                    bail!(
+                        "BUG in DWARF variable filter: index collision for addr 0x{:08x} (old = {:?}, new = {:?})",
+                        addr,
+                        old,
+                        loc
+                    );
                 }
             }
         }
     }
 
     Ok(map)
+}
+
+/// If `entry` is a `CNT_INDEX` static of a live counter, returns its index (address), declaring file and line.
+///
+/// Only errors in reading the DWARF structure itself are propagated, an entry with missing or unusual attributes
+/// is skipped.
+fn cnt_index_variable<R: gimli::read::Reader<Offset = usize>>(
+    entry: &DebuggingInformationEntry<R>,
+    unit: &gimli::Unit<R>,
+    dwarf: &gimli::Dwarf<R>,
+    filter_symbols: &[&str],
+) -> Result<Option<(u64, PathBuf, u64)>, anyhow::Error> {
+    let mut decl_file = None;
+    let mut decl_line = None;
+    let mut name = None;
+    let mut linkage_name = None;
+    let mut location = None;
+
+    for attr in entry.attrs() {
+        match attr.name() {
+            gimli::constants::DW_AT_name => {
+                if let gimli::AttributeValue::DebugStrRef(off) = attr.value() {
+                    name = Some(off);
+                }
+            }
+            gimli::constants::DW_AT_decl_file => {
+                if let gimli::AttributeValue::FileIndex(idx) = attr.value() {
+                    decl_file = Some(idx);
+                }
+            }
+            gimli::constants::DW_AT_decl_line => {
+                if let gimli::AttributeValue::Udata(line) = attr.value() {
+                    decl_line = Some(line);
+                }
+            }
+            gimli::constants::DW_AT_location => {
+                if let gimli::AttributeValue::Exprloc(loc) = attr.value() {
+                    location = Some(loc);
+                }
+            }
+            gimli::constants::DW_AT_linkage_name => {
+                if let gimli::AttributeValue::DebugStrRef(off) = attr.value() {
+                    linkage_name = Some(off);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let (Some(name), Some(linkage_name), Some(file_index), Some(line), Some(loc)) =
+        (name, linkage_name, decl_file, decl_line, location)
+    else {
+        return Ok(None);
+    };
+    let name = dwarf.string(name)?;
+    if name.to_string_lossy()? != "CNT_INDEX" {
+        return Ok(None);
+    }
+    let linkage_name = dwarf.string(linkage_name)?;
+    if !filter_symbols.contains(&&*linkage_name.to_string_lossy()?) {
+        // this symbol was GC-ed by the linker (but remains in the DWARF info),
+        // so we discard it (its `addr` info is also wrong which causes collisions)
+        return Ok(None);
+    }
+    let Some(addr) = exprloc2address(unit.encoding(), &loc) else {
+        return Ok(None);
+    };
+    let Ok(file) = file_index_to_path(file_index, unit, dwarf) else {
+        return Ok(None);
+    };
+    Ok(Some((addr, file, line)))
 }
 
 fn file_index_to_path<R>(
@@ -201,18 +219,19 @@ where
     Ok(p)
 }
 
+/// The address of a static from its `DW_AT_location` expression, `None` if the expression is not a plain address.
 fn exprloc2address<R: gimli::read::Reader<Offset = usize>>(
     encoding: gimli::Encoding,
     data: &gimli::Expression<R>,
-) -> Result<u64, anyhow::Error> {
+) -> Option<u64> {
     let mut pc = data.0.clone();
     while pc.len() != 0 {
-        if let Ok(gimli::Operation::Address { address }) =
-            gimli::Operation::parse(&mut pc, encoding)
-        {
-            return Ok(address);
+        // `parse` always consumes at least the opcode, so this terminates even on malformed input
+        match gimli::Operation::parse(&mut pc, encoding) {
+            Ok(gimli::Operation::Address { address }) => return Some(address),
+            Ok(_) => {}
+            Err(_) => return None,
         }
     }
-
-    Err(anyhow!("`Operation::Address` not found"))
+    None
 }

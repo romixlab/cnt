@@ -4,7 +4,7 @@ resolver = "3"
 
 members = ["cnt", "cnt_cli", "cnt_core", "cnt_macro"]
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Roman Isaikin <romix.lab@gmail.com>"]
 license = "MIT"
@@ -13,5 +13,5 @@ repository = "https://github.com/romixlab/cnt"
 
 [workspace.dependencies]
 anyhow = "1.0"
-cnt_core = { path = "./cnt_core", version = "0.2" }
-cnt_macro = { path = "./cnt_macro", version = "0.2" }
+cnt_core = { path = "./cnt_core", version = "0.3" }
+cnt_macro = { path = "./cnt_macro", version = "0.3" }

@@ -120,16 +120,24 @@ impl CountersBlock {
         self.storage
     }
 
+    /// Decode counter values from the contents of the buffer read from the target.
     pub fn read_values(&mut self, buf: &[u8]) -> anyhow::Result<()> {
-        if buf.len() != self.buffer.size as usize {
-            return Err(anyhow!("Invalid buffer size"));
+        if buf.len() as u64 != self.buffer.size {
+            return Err(anyhow!(
+                "Invalid buffer size: {} B, expected {} B",
+                buf.len(),
+                self.buffer.size
+            ));
         }
         for (addr, counter) in self.entries.iter() {
-            let idx = *addr as usize;
-            let base = idx * 4;
+            // Counters are validated to lie within the buffer when the ELF is loaded, so this only fails on a bug
+            let offset = (counter.buf.addr - self.buffer.addr) as usize;
+            let bytes = buf
+                .get(offset..offset + counter.ty.len())
+                .ok_or_else(|| anyhow!("Counter {} is outside of the buffer", counter.name))?;
             let value = match counter.ty {
-                Ty::U32 => Value::U32(u32::from_le_bytes(buf[base..base + 4].try_into()?)),
-                Ty::U64 => Value::U64(u64::from_le_bytes(buf[base..base + 8].try_into()?)),
+                Ty::U32 => Value::U32(u32::from_le_bytes(bytes.try_into()?)),
+                Ty::U64 => Value::U64(u64::from_le_bytes(bytes.try_into()?)),
             };
             self.values.insert(*addr, value);
         }
