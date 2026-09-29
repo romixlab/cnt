@@ -361,6 +361,7 @@ dependencies = [
  "human-repr",
  "probe-rs",
  "ratatui",
+ "ratatui-core",
  "serde_json",
  "toml",
 ]
@@ -1733,6 +1734,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbb175c433c8e28a809d1f5773a2ae96e68c0ce40db865cbab1020bf33ae479c"
 dependencies = [
+ "anstyle",
  "bitflags 2.13.2",
  "compact_str",
  "critical-section",

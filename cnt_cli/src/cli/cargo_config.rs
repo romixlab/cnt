@@ -5,7 +5,7 @@
 //! runner = "probe-rs run --chip STM32H533RE"
 //! ```
 
-use super::theme::theme;
+use crate::theme::theme;
 use anstream::eprintln;
 use std::path::{Path, PathBuf};
 

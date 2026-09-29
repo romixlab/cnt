@@ -4,8 +4,8 @@ mod list;
 mod probe;
 mod read;
 pub mod reset;
-mod theme;
 
+use crate::theme::theme;
 use anstream::{eprintln, println};
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::Counters;
@@ -30,7 +30,7 @@ impl Cli {
     /// The theme is downgraded at runtime depending on the terminal's capabilities,
     /// so it is applied here rather than via `#[command(styles = ...)]`.
     pub fn parse_styled() -> Self {
-        let matches = Self::command().styles(theme::select_style()).get_matches();
+        let matches = Self::command().styles(theme().clap.clone()).get_matches();
         match Self::from_arg_matches(&matches) {
             Ok(cli) => cli,
             Err(err) => err.exit(),
@@ -52,7 +52,7 @@ impl Elf {
             Some(path) => Ok(path.clone()),
             None => {
                 let path = elf::find_elf()?;
-                let (hint, style) = (theme::theme().hint, theme::theme().path);
+                let (hint, style) = (theme().hint, theme().path);
                 eprintln!("{hint}Using ELF{hint:#} {style}{}{style:#}", path.display());
                 Ok(path)
             }
@@ -114,7 +114,7 @@ pub fn process_cmd(cmd: Command, mut counters: Counters, elf_path: &Path) -> any
         Command::Reset { bkp, probe, .. } => {
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
-            let hint = theme::theme().hint;
+            let hint = theme().hint;
             if let Some(block) = counters.ram_counters() {
                 println!("{hint}Resetting RAM counters{hint:#}");
                 reset::reset(&block, &mut core)?;

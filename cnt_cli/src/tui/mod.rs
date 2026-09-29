@@ -1,10 +1,11 @@
+use crate::theme::theme;
 use cnt_core::{Counters, CountersBlock, Value};
 use crossterm::event::{self, KeyCode};
 use human_repr::HumanCount;
 use probe_rs::{Core, MemoryInterface};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table, TableState};
 use std::time::Duration;
@@ -46,9 +47,13 @@ fn render(frame: &mut Frame, table_state: &mut TableState, counters: &CountersBl
     let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).spacing(1);
     let [top, main] = frame.area().layout(&layout);
 
+    let t = theme();
     let title = Line::from_iter([
-        Span::from("Counters").bold(),
-        Span::from(" (Press 'q' to quit and arrow keys to navigate)"),
+        Span::styled("Counters", Style::from(t.header)),
+        Span::styled(
+            " (Press 'q' to quit and arrow keys to navigate)",
+            Style::from(t.hint),
+        ),
     ]);
     frame.render_widget(title.centered(), top);
 
@@ -61,8 +66,9 @@ pub fn render_table(
     table_state: &mut TableState,
     counters: &CountersBlock,
 ) {
+    let t = theme();
     let header = Row::new(["Name", "Value", "Ty", "Severity", "Location"])
-        .style(Style::new().bold())
+        .style(Style::from(t.header))
         .bottom_margin(1);
 
     // let footer = Row::new([]);
@@ -78,13 +84,14 @@ pub fn render_table(
             Cell::new(cnt.name.as_str()),
             human_readable_value(value, &cnt.unit),
             Cell::new(format!("{} {}", cnt.ty, cnt.storage)),
-            Cell::new(format!("{:?}", cnt.severity)),
+            Cell::new(format!("{:?}", cnt.severity)).style(Style::from(t.severity(cnt.severity))),
             Cell::new(
                 cnt.location
                     .as_ref()
                     .map(|l| format!("{}:{}", l.file.display(), l.line))
                     .unwrap_or_default(),
-            ),
+            )
+            .style(Style::from(t.path)),
         ])
     });
 
@@ -92,10 +99,10 @@ pub fn render_table(
         .header(header)
         // .footer(footer.italic())
         .column_spacing(1)
-        .style(Color::White)
-        .row_highlight_style(Style::new().on_black().bold())
-        .column_highlight_style(Color::Gray)
-        .cell_highlight_style(Style::new().reversed().yellow())
+        .style(Style::from(t.table))
+        .row_highlight_style(Style::from(t.row_highlight))
+        .column_highlight_style(Style::from(t.column_highlight))
+        .cell_highlight_style(Style::from(t.cell_highlight))
         .highlight_symbol("🍴 ");
 
     frame.render_stateful_widget(table, area, table_state);

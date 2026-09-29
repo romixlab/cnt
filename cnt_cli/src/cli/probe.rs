@@ -1,7 +1,7 @@
 //! Probe and target selection, following the conventions of the probe-rs CLI.
 
 use super::cargo_config;
-use super::theme::theme;
+use crate::theme::theme;
 use anstream::eprintln;
 use anyhow::{Context, bail};
 use clap::Args;

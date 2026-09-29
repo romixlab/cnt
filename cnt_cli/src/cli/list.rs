@@ -1,4 +1,4 @@
-use super::theme::theme;
+use crate::theme::theme;
 use anstream::{print, println};
 use cnt_core::{Counter, Counters, CountersBlock, Severity};
 

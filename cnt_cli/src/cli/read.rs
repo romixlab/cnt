@@ -1,5 +1,5 @@
 use super::list::{name_width, print_header, print_location, severity_label};
-use super::theme::theme;
+use crate::theme::theme;
 use anstream::println;
 use cnt_core::{Counters, CountersBlock};
 use probe_rs::{Core, MemoryInterface};

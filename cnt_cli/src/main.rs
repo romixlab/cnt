@@ -1,7 +1,8 @@
-use cnt_core::Counters;
 use anyhow::Result;
+use cnt_core::Counters;
 
 mod cli;
+mod theme;
 mod tui;
 
 fn main() -> Result<()> {
