@@ -84,10 +84,8 @@ pub struct Theme {
     pub table: Style,
     /// TUI selected row
     pub row_highlight: Style,
-    /// TUI selected column
-    pub column_highlight: Style,
-    /// TUI selected cell
-    pub cell_highlight: Style,
+    /// TUI keyboard shortcuts
+    pub key: Style,
 }
 
 impl Theme {
@@ -116,8 +114,7 @@ impl Theme {
             ],
             table: fg(p.text),
             row_highlight: Style::new().bg_color(Some(p.selection)).bold(),
-            column_highlight: fg(p.gray),
-            cell_highlight: fg(p.yellow).invert(),
+            key: fg(p.blue).bold(),
         }
     }
 

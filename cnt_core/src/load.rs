@@ -112,6 +112,13 @@ impl Counters {
     pub fn bkp_counters_mut(&mut self) -> Option<&mut CountersBlock> {
         self.bkp_counters.as_mut()
     }
+
+    /// RAM and BKP counters, whichever are in use.
+    pub fn blocks_mut(&mut self) -> impl Iterator<Item = &mut CountersBlock> {
+        self.ram_counters
+            .iter_mut()
+            .chain(self.bkp_counters.iter_mut())
+    }
 }
 
 fn collect_counters<'f>(
@@ -176,8 +183,9 @@ fn fill_locations(counters: &mut BTreeMap<u64, Counter>, locations: BTreeMap<u64
 
 fn fill_addresses(counters: &mut BTreeMap<u64, Counter>, buffer: Buffer) {
     for (idx, counter) in counters.iter_mut() {
+        // Indices are in 32-bit words, see `CountersBlock::read_values`
         counter.buf = Buffer {
-            addr: buffer.addr + idx * counter.ty.len() as u64,
+            addr: buffer.addr + idx * 4,
             size: counter.ty.len() as u64,
         };
     }

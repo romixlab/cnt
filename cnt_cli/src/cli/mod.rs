@@ -1,6 +1,6 @@
 mod cargo_config;
 mod elf;
-mod list;
+pub(crate) mod list;
 mod probe;
 mod read;
 pub mod reset;

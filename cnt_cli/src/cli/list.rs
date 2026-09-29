@@ -67,7 +67,7 @@ pub(super) fn name_width(cnt: &CountersBlock) -> usize {
 }
 
 /// Fixed-width severity label, as printed by defmt.
-pub(super) fn severity_label(severity: Severity) -> &'static str {
+pub(crate) fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "ERROR",
         Severity::Warn => "WARN ",
