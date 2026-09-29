@@ -48,24 +48,23 @@ pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTree
 
         ensure!(cursor.next_dfs()?.is_some(), "empty DWARF?");
 
-        let mut segments = vec![];
-        let mut depth = 0;
+        // Enclosing namespaces of the current entry, with their (absolute) tree depth
+        let mut segments: Vec<(isize, String)> = vec![];
         while let Some(entry) = cursor.next_dfs()? {
             let entry: &DebuggingInformationEntry<_> = entry;
-            depth += entry.depth;
+            // Leave namespaces that are not ancestors of this entry
+            while segments
+                .last()
+                .is_some_and(|(depth, _)| *depth >= entry.depth())
+            {
+                segments.pop();
+            }
 
             // here start the custom logic
             if entry.tag() == gimli::constants::DW_TAG_namespace {
-                for attr in entry.attrs() {
-                    if attr.name() == gimli::constants::DW_AT_name {
-                        if let gimli::AttributeValue::DebugStrRef(off) = attr.value() {
-                            let s = dwarf.string(off)?;
-                            for _ in (depth as usize)..segments.len() + 1 {
-                                segments.pop();
-                            }
-                            segments.push(core::str::from_utf8(&s)?.to_string());
-                        }
-                    }
+                if let Some(name) = entry.attr_value(gimli::constants::DW_AT_name) {
+                    let name = dwarf.attr_string(&unit, name)?;
+                    segments.push((entry.depth(), name.to_string_lossy().into_owned()));
                 }
             } else if entry.tag() == gimli::constants::DW_TAG_variable {
                 // what we are after
@@ -124,7 +123,11 @@ pub(crate) fn get_locations(elf: &File, filter_symbols: &[&str]) -> Result<BTree
                         if filter_symbols.iter().any(|i| *i == linkage_name) {
                             let addr = exprloc2address(unit.encoding(), &loc)?;
                             let file = file_index_to_path(file_index, &unit, &dwarf)?;
-                            let module = segments.join("::");
+                            let module = segments
+                                .iter()
+                                .map(|(_, name)| name.as_str())
+                                .collect::<Vec<_>>()
+                                .join("::");
 
                             let module = dedup(&mut dedup_str, module);
                             let file = dedup(&mut dedup_path, file);

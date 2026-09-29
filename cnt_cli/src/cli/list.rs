@@ -77,18 +77,23 @@ pub(super) fn severity_label(severity: Severity) -> &'static str {
     }
 }
 
-/// defmt-style location line: `└─ file:line`.
+/// defmt-style location line: `└─ module @ file:line`.
 pub(super) fn print_location(c: &Counter) {
     let t = theme();
     let (hint, path) = (t.hint, t.path);
-    match &c.location {
-        Some(location) => println!(
-            "{hint}└─{hint:#} {path}{}:{}{path:#}",
-            location.file.display(),
-            location.line
-        ),
-        None => println!("{hint}└─ <unknown location>{hint:#}"),
+    let Some(location) = &c.location else {
+        println!("{hint}└─ <unknown location>{hint:#}");
+        return;
+    };
+    print!("{hint}└─ ");
+    if !location.module.is_empty() {
+        print!("{} @ ", location.module);
     }
+    println!(
+        "{hint:#}{path}{}:{}{path:#}",
+        location.file.display(),
+        location.line
+    );
 }
 
 /// Total and free space in the buffer, with a warning when it is (nearly) full.
