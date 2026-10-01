@@ -1,16 +1,19 @@
 mod cargo_config;
 mod elf;
 pub(crate) mod list;
+pub(crate) mod logs;
 mod output;
 mod probe;
 mod read;
 pub mod reset;
+mod run;
 
 use crate::theme::theme;
 use anstream::{eprintln, println};
 use anyhow::bail;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::{Counters, Storage};
+use logs::LogOptions;
 pub(crate) use output::Format;
 use probe::ProbeOptions;
 use std::path::{Path, PathBuf};
@@ -74,8 +77,9 @@ pub(crate) enum Command {
     List(Elf),
     /// Read counters from a connected target using probe-rs
     Read {
-        /// Keep reading and print counters whose value changed, until interrupted. All counters are printed first,
-        /// lower values are reported as a reset if all counters of the buffer went down, and as a decrease otherwise
+        /// Keep reading and print counters whose value changed together with defmt logs, until interrupted. All
+        /// counters are printed first, lower values are reported as a reset if all counters of the buffer went down,
+        /// and as a decrease otherwise
         #[arg(long)]
         watch: bool,
         /// Time between reads in watch mode, in milliseconds
@@ -85,6 +89,24 @@ pub(crate) enum Command {
         elf: Elf,
         #[command(flatten)]
         probe: ProbeOptions,
+        #[command(flatten)]
+        log: LogOptions,
+    },
+    /// Flash the firmware, restart the target and show defmt logs and counter changes as `read --watch` does, until
+    /// interrupted. Can be used as a cargo runner instead of probe-rs: `runner = "cnt run --chip <CHIP>"`
+    Run {
+        /// Show the TUI instead
+        #[arg(long)]
+        tui: bool,
+        /// Time between counter reads, in milliseconds
+        #[arg(long, default_value_t = 100, conflicts_with = "tui")]
+        interval: u64,
+        #[command(flatten)]
+        elf: Elf,
+        #[command(flatten)]
+        probe: ProbeOptions,
+        #[command(flatten)]
+        log: LogOptions,
     },
     /// Reset counters to zero on a connected target
     Reset {
@@ -102,6 +124,8 @@ pub(crate) enum Command {
         elf: Elf,
         #[command(flatten)]
         probe: ProbeOptions,
+        #[command(flatten)]
+        log: LogOptions,
     },
 }
 
@@ -110,6 +134,7 @@ impl Command {
         match self {
             Command::List(elf)
             | Command::Read { elf, .. }
+            | Command::Run { elf, .. }
             | Command::Tui { elf, .. }
             | Command::Reset { elf, .. } => elf,
         }
@@ -134,19 +159,51 @@ pub fn process_cmd(
             watch: true,
             interval,
             probe,
+            log,
             ..
         } => {
             if format == Format::Json {
                 bail!("--watch prints a stream of changes, use --format jsonl or text");
             }
+            let mut defmt = log.reader(elf_path);
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
             read::watch(
                 &mut counters,
                 &mut core,
+                defmt.as_mut(),
                 format,
                 Duration::from_millis(interval),
             )?;
+        }
+        Command::Run {
+            tui,
+            interval,
+            probe,
+            log,
+            ..
+        } => {
+            if tui && format != Format::Text {
+                bail!("The TUI only supports text output");
+            }
+            if format == Format::Json {
+                bail!("run prints a stream of changes, use --format jsonl or text");
+            }
+            let mut defmt = log.reader(elf_path);
+            let mut session = probe.attach(elf_path)?;
+            run::flash_and_reset(&mut session, elf_path, defmt.as_ref())?;
+            let mut core = session.core(0)?;
+            if tui {
+                crate::tui::tui(&mut counters, &mut core, defmt)?;
+            } else {
+                read::watch(
+                    &mut counters,
+                    &mut core,
+                    defmt.as_mut(),
+                    format,
+                    Duration::from_millis(interval),
+                )?;
+            }
         }
         Command::Read { probe, .. } => {
             let mut session = probe.attach(elf_path)?;
@@ -181,15 +238,16 @@ pub fn process_cmd(
                 output::reset(format, &done)?;
             }
         }
-        Command::Tui { probe, .. } => {
+        Command::Tui { probe, log, .. } => {
             if format != Format::Text {
                 bail!(
                     "The TUI only supports text output, use `cnt read --format json|jsonl` instead"
                 );
             }
+            let defmt = log.reader(elf_path);
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
-            crate::tui::tui(&mut counters, &mut core)?;
+            crate::tui::tui(&mut counters, &mut core, defmt)?;
         }
     }
     Ok(())

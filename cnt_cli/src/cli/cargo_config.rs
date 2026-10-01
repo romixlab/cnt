@@ -15,7 +15,7 @@ pub struct ConfigChip {
     pub path: PathBuf,
 }
 
-/// Search cargo config files for a runner with `--chip`.
+/// Search cargo config files for a probe-rs or cnt runner with `--chip`.
 ///
 /// The current directory and its ancestors are searched first, as cargo does. Then the ancestors of the ELF file,
 /// including `<ancestor>/<ELF name>/` to cover workspaces where the firmware crate has its own `.cargo/config.toml`.
@@ -92,7 +92,9 @@ fn chip_from_runner(runner: &toml::Value) -> Option<String> {
         toml::Value::Array(a) => a.iter().filter_map(toml::Value::as_str).collect(),
         _ => return None,
     };
-    if !args.first()?.ends_with("probe-rs") {
+    // `cnt run` takes the same `--chip` argument
+    let runner = Path::new(args.first()?).file_stem()?;
+    if runner != "probe-rs" && runner != "cnt" {
         return None;
     }
     let mut args = args.into_iter();
@@ -129,6 +131,7 @@ mod tests {
             chip("/usr/bin/probe-rs run --connect-under-reset --chip nRF52840_xxAA").as_deref(),
             Some("nRF52840_xxAA")
         );
+        assert_eq!(chip("cnt run --chip RP235x").as_deref(), Some("RP235x"));
         assert_eq!(chip("probe-rs run"), None);
         assert_eq!(chip("elf2uf2-rs -d"), None);
         let array = toml::Value::Array(vec![

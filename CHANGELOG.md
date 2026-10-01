@@ -16,6 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cnt_cli`: `read --watch [--interval <MS>]` polls the target and prints counters whose value changed, with their
   current value. In `jsonl` lines carry `event` (`initial`/`change`, `reset` when all non-zero counters of a buffer
   decreased, `decrease` when only some did) and `ts` (Unix milliseconds).
+- `cnt_cli`: defmt logs. `read --watch` and the TUI decode defmt-rtt logs of the firmware and show them together with
+  the counters, over the same probe session (`--no-defmt` to disable). The defmt channel is set to blocking while
+  attached and restored on exit, Ctrl+C included. In `jsonl` logs are `{"event": "log", ...}` lines.
+- `cnt_cli`: `cnt run [--tui]` flashes the firmware, resets the target and shows logs and counter changes, so it can
+  replace `probe-rs run` as the cargo runner. `--chip` is also taken from a `cnt run --chip <CHIP>` runner.
 - `cnt_core`: `Storage`, `Ty` and `Severity` implement `Serialize`.
 
 ## [0.4.0] - 2026-09-29

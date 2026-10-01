@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 #[derive(Args)]
 #[command(next_help_heading = "Probe Options")]
 pub(crate) struct ProbeOptions {
-    /// The target chip to attach to (e.g. STM32H533RE). If omitted, taken from a probe-rs runner in
+    /// The target chip to attach to (e.g. STM32H533RE). If omitted, taken from a probe-rs or cnt runner in
     /// .cargo/config.toml, or auto-detected
     #[arg(long, env = "PROBE_RS_CHIP")]
     chip: Option<String>,

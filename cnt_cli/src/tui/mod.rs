@@ -1,21 +1,28 @@
 use crate::cli::list::severity_label;
+use crate::cli::logs::{DefmtReader, Log};
 use crate::cli::reset::reset;
 use crate::theme::theme;
 use anstream::println;
 use cnt_core::{Counter, Counters, CountersBlock, Severity, Storage, Value};
-use crossterm::event::{self, KeyCode};
+use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
 use human_repr::HumanCount;
 use probe_rs::{Core, MemoryInterface};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Cell, HighlightSpacing, Row, Table, TableState};
-use std::collections::HashMap;
+use ratatui::widgets::{
+    Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Table, TableState,
+};
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 /// How often counters are read from the target.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(50);
+/// How often defmt logs are read. RTT buffers are small, and the firmware blocks when they are full.
+const LOG_INTERVAL: Duration = Duration::from_millis(10);
+/// Number of log messages kept.
+const LOG_HISTORY: usize = 1000;
 /// How long a value stays highlighted after it changed.
 const CHANGE_HIGHLIGHT: Duration = Duration::from_secs(1);
 /// Rows taken by a panel besides the counters: borders, table header and its margin.
@@ -24,32 +31,52 @@ const HIGHLIGHT_SYMBOL: &str = "▶ ";
 const HIGHLIGHT_SYMBOL_WIDTH: u16 = 2;
 const COLUMN_SPACING: u16 = 2;
 
-pub fn tui(counters: &mut Counters, core: &mut Core) -> anyhow::Result<()> {
+pub fn tui(
+    counters: &mut Counters,
+    core: &mut Core,
+    defmt: Option<DefmtReader>,
+) -> anyhow::Result<()> {
     if counters.is_empty() {
         let hint = theme().hint;
         println!("{hint}No counters found{hint:#}");
         return Ok(());
     }
 
-    let mut app = App::new(counters);
+    let mut app = App::new(counters, defmt);
     app.refresh(core);
-    ratatui::run(|terminal| {
+    let result: std::io::Result<()> = ratatui::run(|terminal| {
         let mut last_refresh = Instant::now();
+        let mut redraw = true;
         loop {
-            terminal.draw(|frame| app.render(frame))?;
-            let timeout = REFRESH_INTERVAL.saturating_sub(last_refresh.elapsed());
-            if event::poll(timeout)?
-                && let Some(key) = event::read()?.as_key_press_event()
-                && !app.handle_key(key.code, core)
-            {
-                return Ok(());
+            if redraw {
+                terminal.draw(|frame| app.render(frame))?;
+                redraw = false;
             }
+            let mut timeout = REFRESH_INTERVAL.saturating_sub(last_refresh.elapsed());
+            if app.defmt.is_some() {
+                timeout = timeout.min(LOG_INTERVAL);
+            }
+            if event::poll(timeout)? {
+                if let Some(key) = event::read()?.as_key_press_event()
+                    && !app.handle_key(key, core)
+                {
+                    return Ok(());
+                }
+                // Key presses and resizes
+                redraw = true;
+            }
+            redraw |= app.poll_logs(core);
             if last_refresh.elapsed() >= REFRESH_INTERVAL {
                 app.refresh(core);
                 last_refresh = Instant::now();
+                redraw = true;
             }
         }
-    })
+    });
+    // Also after errors, as the firmware blocks on a full log buffer otherwise
+    let detached = app.defmt.as_mut().map_or(Ok(()), |d| d.detach(core));
+    result?;
+    detached
 }
 
 /// A table of RAM or BKP counters.
@@ -68,6 +95,10 @@ struct App<'a> {
     status: Option<Status>,
     /// Last failed read, cleared on the next successful one
     read_error: Option<String>,
+    defmt: Option<DefmtReader>,
+    logs: VecDeque<Log>,
+    /// Last failed log read, cleared on the next successful one
+    log_error: Option<String>,
 }
 
 enum Status {
@@ -76,7 +107,7 @@ enum Status {
 }
 
 impl<'a> App<'a> {
-    fn new(counters: &'a mut Counters) -> Self {
+    fn new(counters: &'a mut Counters, defmt: Option<DefmtReader>) -> Self {
         let panels = counters
             .blocks_mut()
             .map(|counters| Panel {
@@ -90,14 +121,20 @@ impl<'a> App<'a> {
             changed: HashMap::new(),
             status: None,
             read_error: None,
+            defmt,
+            logs: VecDeque::new(),
+            log_error: None,
         }
     }
 
     /// Returns false when the TUI should exit.
-    fn handle_key(&mut self, code: KeyCode, core: &mut Core) -> bool {
+    fn handle_key(&mut self, key: KeyEvent, core: &mut Core) -> bool {
         let state = &mut self.panels[self.focus].state;
-        match code {
+        match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return false,
+            // Raw mode turns Ctrl+C into a key press
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return false,
+            KeyCode::Char('c') => self.logs.clear(),
             KeyCode::Tab | KeyCode::BackTab => self.focus = (self.focus + 1) % self.panels.len(),
             KeyCode::Char('j') | KeyCode::Down => state.select_next(),
             KeyCode::Char('k') | KeyCode::Up => state.select_previous(),
@@ -138,6 +175,26 @@ impl<'a> App<'a> {
         self.read_error = None;
     }
 
+    /// Read new defmt logs, returns whether there is anything new to show.
+    fn poll_logs(&mut self, core: &mut Core) -> bool {
+        let Some(defmt) = &mut self.defmt else {
+            return false;
+        };
+        match defmt.poll(core) {
+            Ok(logs) => {
+                let had_error = self.log_error.take().is_some();
+                self.logs.extend(logs);
+                let excess = self.logs.len().saturating_sub(LOG_HISTORY);
+                self.logs.drain(..excess);
+                had_error || !self.logs.is_empty()
+            }
+            Err(e) => {
+                self.log_error = Some(format!("Failed to read defmt logs: {e:#}"));
+                true
+            }
+        }
+    }
+
     fn render(&mut self, frame: &mut Frame) {
         let layout = Layout::vertical([
             Constraint::Length(1),
@@ -148,9 +205,21 @@ impl<'a> App<'a> {
         let [title, main, status, keys] = frame.area().layout(&layout);
 
         frame.render_widget(self.title().centered(), title);
-        self.render_panels(frame, main);
+        let counters = if self.defmt.is_some() {
+            // Counters take what they need, but leave at least a third to the logs
+            let height = self.panels_height().min(main.height * 2 / 3);
+            let [counters, logs] = main.layout(&Layout::vertical([
+                Constraint::Length(height),
+                Constraint::Fill(1),
+            ]));
+            self.render_logs(frame, logs);
+            counters
+        } else {
+            main
+        };
+        self.render_panels(frame, counters);
         frame.render_widget(self.status_line(), status);
-        frame.render_widget(keys_line(self.panels.len() > 1), keys);
+        frame.render_widget(keys_line(self.panels.len() > 1, self.defmt.is_some()), keys);
     }
 
     /// `Counters · 2 of 14 non-zero`
@@ -174,6 +243,47 @@ impl<'a> App<'a> {
             Span::styled(fired.to_string(), fired_style),
             Span::styled(format!(" of {total} non-zero"), Style::from(t.hint)),
         ])
+    }
+
+    /// Rows needed to show all panels in full.
+    fn panels_height(&self) -> u16 {
+        self.panels
+            .iter()
+            .map(|p| p.counters.entries().len() as u16 + PANEL_OVERHEAD)
+            .sum()
+    }
+
+    /// The most recent logs that fit, newest at the bottom.
+    fn render_logs(&self, frame: &mut Frame, area: Rect) {
+        let t = theme();
+        let hint = Style::from(t.hint);
+        let attached = self.defmt.as_ref().is_some_and(|d| d.is_attached());
+        let title = Line::from_iter([
+            Span::raw(" 📜 "),
+            Span::styled("defmt logs", Style::from(t.header)),
+            Span::styled(if attached { " " } else { " waiting for RTT " }, hint),
+        ]);
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(hint)
+            .title(title);
+        let height = block.inner(area).height as usize;
+
+        let mut lines = vec![];
+        for log in self.logs.iter().rev() {
+            if lines.len() >= height {
+                break;
+            }
+            lines.push(log_lines(log));
+        }
+        let mut lines: Vec<Line> = lines.into_iter().rev().flatten().collect();
+        let excess = lines.len().saturating_sub(height);
+        lines.drain(..excess);
+
+        let logs = Paragraph::new(lines)
+            .block(block)
+            .style(Style::from(t.table));
+        frame.render_widget(logs, area);
     }
 
     fn render_panels(&mut self, frame: &mut Frame, area: Rect) {
@@ -212,7 +322,8 @@ impl<'a> App<'a> {
 
     fn status_line(&self) -> Line<'static> {
         let t = theme();
-        let (text, style) = match (&self.read_error, &self.status) {
+        let error = self.read_error.as_ref().or(self.log_error.as_ref());
+        let (text, style) = match (error, &self.status) {
             (Some(e), _) | (None, Some(Status::Error(e))) => (format!("🛑 {e}"), t.error),
             (None, Some(Status::Info(s))) => (format!("✔ {s}"), t.hint),
             (None, None) => return Line::default(),
@@ -411,8 +522,46 @@ fn format_value(value: Option<Value>, unit: &str) -> String {
     }
 }
 
+/// `0.000123 INFO  message @ src/main.rs:42`, continuation lines of the message indented below it.
+fn log_lines(log: &Log) -> Vec<Line<'static>> {
+    let t = theme();
+    let hint = Style::from(t.hint);
+    let style = log
+        .severity()
+        .map_or(Style::from(t.table), |s| Style::from(t.severity(s)));
+    let mut prefix = vec![];
+    if let Some(ts) = &log.timestamp {
+        prefix.push(Span::styled(format!("{ts} "), hint));
+    }
+    prefix.push(Span::styled(format!("{} ", log.level_label()), style));
+    let indent = " ".repeat(prefix.iter().map(|s| s.width()).sum());
+
+    let mut lines: Vec<Line> = log
+        .message
+        .lines()
+        .enumerate()
+        .map(|(i, text)| {
+            let mut spans = if i == 0 {
+                prefix.clone()
+            } else {
+                vec![Span::raw(indent.clone())]
+            };
+            spans.push(Span::raw(text.to_string()));
+            Line::from(spans)
+        })
+        .collect();
+    if lines.is_empty() {
+        lines.push(Line::from(prefix));
+    }
+    if let Some(file_line) = log.file_line() {
+        lines[0].push_span(Span::styled(" @ ", hint));
+        lines[0].push_span(Span::styled(file_line, Style::from(t.path)));
+    }
+    lines
+}
+
 /// Keyboard shortcuts help.
-fn keys_line(multiple_panels: bool) -> Line<'static> {
+fn keys_line(multiple_panels: bool, logs: bool) -> Line<'static> {
     let t = theme();
     let (key, hint) = (Style::from(t.key), Style::from(t.hint));
     let mut keys = vec![("q", "quit"), ("↑↓/jk", "select"), ("g/G", "first/last")];
@@ -420,6 +569,9 @@ fn keys_line(multiple_panels: bool) -> Line<'static> {
         keys.push(("Tab", "switch table"));
     }
     keys.extend([("r", "reset RAM"), ("R", "reset BKP")]);
+    if logs {
+        keys.push(("c", "clear logs"));
+    }
     let spans = keys.into_iter().enumerate().flat_map(|(i, (k, desc))| {
         let sep = if i == 0 { "" } else { "  " };
         [

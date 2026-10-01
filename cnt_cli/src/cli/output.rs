@@ -4,9 +4,12 @@
 //! - `jsonl`: one compact object per counter and line, with the block's `storage` added to each.
 //!
 //! Counters have a `value` member only when read from a target. `read --watch` prints `jsonl` lines with an `event`
-//! (see [`Event`]) and a `ts` (Unix time in milliseconds) in front of the counter.
+//! (see [`Event`]) and a `ts` (Unix time in milliseconds) in front of the counter. defmt logs are interleaved as
+//! `{"event": "log", "ts": ..., "level": ..., "timestamp": ..., "message": ..., "module": ..., "file": ..., "line": ...}`,
+//! `level`, `timestamp` and the location are `null` if not available.
 //! Diagnostics go to stderr, stdout only has JSON.
 
+use super::logs::Log;
 use clap::ValueEnum;
 use cnt_core::{Counter, Counters, CountersBlock, Storage, Value};
 use serde_json::{Value as Json, json};
@@ -80,6 +83,21 @@ pub fn watch_event(
 ) -> anyhow::Result<()> {
     let mut line = json!({ "event": event.as_str(), "ts": ts, "storage": storage });
     merge(&mut line, counter(c, Some(value)));
+    write_lines(std::iter::once(line))
+}
+
+/// One `jsonl` line of a defmt log in watch mode.
+pub fn log_event(ts: u64, log: &Log) -> anyhow::Result<()> {
+    let line = json!({
+        "event": "log",
+        "ts": ts,
+        "level": log.severity(),
+        "timestamp": log.timestamp,
+        "message": log.message,
+        "module": log.location.map(|l| &l.module),
+        "file": log.location.map(|l| l.file.display().to_string()),
+        "line": log.location.map(|l| l.line),
+    });
     write_lines(std::iter::once(line))
 }
 
