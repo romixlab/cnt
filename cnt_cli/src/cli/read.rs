@@ -1,8 +1,9 @@
+use super::keys::{QuitKey, restore_terminal};
 use super::list::{name_width, print_header, print_location, severity_label};
 use super::logs::{DefmtReader, Log};
 use super::output::{self, Event, Format};
 use crate::theme::theme;
-use anstream::println;
+use anstream::{eprintln, println};
 use cnt_core::{Counter, Counters, CountersBlock, Storage, Value};
 use probe_rs::{Core, MemoryInterface};
 use std::collections::HashMap;
@@ -72,6 +73,11 @@ pub fn watch(
     interval: Duration,
 ) -> anyhow::Result<()> {
     let stop = stop_on_ctrl_c()?;
+    let mut quit = QuitKey::new()?;
+    if quit.is_some() && format == Format::Text {
+        let hint = theme().hint;
+        eprintln!("{hint}Press q or Ctrl+C to stop{hint:#}");
+    }
     let result = watch_until(
         counters,
         core,
@@ -79,7 +85,9 @@ pub fn watch(
         format,
         interval,
         &stop,
+        quit.as_mut(),
     );
+    drop(quit);
     // Also after errors, as the firmware blocks on a full log buffer otherwise
     let detached = defmt.map_or(Ok(()), |d| d.detach(core));
     result.and(detached)
@@ -92,6 +100,7 @@ fn watch_until(
     format: Format,
     interval: Duration,
     stop: &AtomicBool,
+    mut quit: Option<&mut QuitKey>,
 ) -> anyhow::Result<()> {
     let start = Instant::now();
     read(counters, core)?;
@@ -125,7 +134,17 @@ fn watch_until(
             Some(_) => next_read.min(Instant::now() + LOG_INTERVAL),
             None => next_read,
         };
-        std::thread::sleep(wake.saturating_duration_since(Instant::now()));
+        let timeout = wake.saturating_duration_since(Instant::now());
+        let quit_pressed = match quit.as_deref_mut() {
+            Some(quit) => quit.wait(timeout)?,
+            None => {
+                std::thread::sleep(timeout);
+                false
+            }
+        };
+        if quit_pressed {
+            break;
+        }
     }
     Ok(())
 }
@@ -186,6 +205,7 @@ fn stop_on_ctrl_c() -> anyhow::Result<Arc<AtomicBool>> {
     let flag = stop.clone();
     ctrlc::set_handler(move || {
         if flag.swap(true, Ordering::Relaxed) {
+            restore_terminal();
             std::process::exit(130);
         }
     })?;

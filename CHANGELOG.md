@@ -20,7 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the counters, over the same probe session (`--no-defmt` to disable). The defmt channel is set to blocking while
   attached and restored on exit, Ctrl+C included. In `jsonl` logs are `{"event": "log", ...}` lines.
 - `cnt_cli`: `cnt run [--tui]` flashes the firmware, resets the target and shows logs and counter changes, so it can
-  replace `probe-rs run` as the cargo runner. `--chip` is also taken from a `cnt run --chip <CHIP>` runner.
+  replace `probe-rs run` as the cargo runner. `--chip` is also taken from a `cnt run --chip <CHIP>` runner. Flashing
+  shows a progress bar per operation (erase, program, verify) on a terminal.
+- `cnt_cli`: `q` (or Esc) stops `read --watch` and `cnt run` when stdin is a terminal, like Ctrl+C.
 - `cnt_core`: `Storage`, `Ty` and `Severity` implement `Serialize`.
 
 ## [0.4.0] - 2026-09-29

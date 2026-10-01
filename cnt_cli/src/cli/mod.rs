@@ -1,5 +1,6 @@
 mod cargo_config;
 mod elf;
+mod keys;
 pub(crate) mod list;
 pub(crate) mod logs;
 mod output;

@@ -59,7 +59,7 @@ Library crates can count per instance, see [Instance counters](#instance-counter
   * defmt logs of the firmware (defmt-rtt) are shown together with the counters in `cnt read --watch` and `cnt tui`,
     using the same probe connection, `--no-defmt` turns them off. In `jsonl` they are `{"event": "log", ...}` lines.
   * `cnt run` flashes the firmware, resets the target and then works like `cnt read --watch` (or `cnt tui` with
-    `--tui`), so it can be the cargo runner instead of `probe-rs run`:
+    `--tui`), so it can be the cargo runner instead of `probe-rs run`. Watching stops with `q` or Ctrl+C:
     ```toml
     [target.'cfg(all(target_arch = "arm", target_os = "none"))']
     runner = "cnt run --chip STM32H533RE"

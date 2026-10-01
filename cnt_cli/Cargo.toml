@@ -29,3 +29,7 @@ ratatui = "0.30.2"
 ratatui-core = { version = "0.1.2", features = ["anstyle"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 toml = "1.1.6"
+
+[target.'cfg(unix)'.dependencies]
+# Reading single key presses in watch mode, while keeping output processing and Ctrl+C
+rustix = { version = "1", default-features = false, features = ["std", "termios"] }
