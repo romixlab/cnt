@@ -49,6 +49,13 @@ Library crates can count per instance, see [Instance counters](#instance-counter
     If multiple probes are connected and `--probe` is not given, you will be asked to pick one.
   * If `--chip` is not given, it is taken from a `probe-rs run --chip <CHIP>` runner in `.cargo/config.toml`, so usually
     just `cnt read` or `cnt tui` is enough.
+  * For scripts, CI and agents: `--format json` prints one JSON document, `--format jsonl` one JSON object per counter
+    and line (also `CNT_FORMAT=json`), e.g. `cnt read --format jsonl | jq 'select(.value > 0)'`. Applies to `list`,
+    `read` and `reset`; JSON goes to stdout, diagnostics to stderr.
+  * To follow changes: `cnt read --watch [--interval <MS>]` prints all counters, then every counter whose value changed,
+    with its current value. With `--format jsonl` each line has an `event` (`initial`, `change`, `reset` when all
+    non-zero counters of a buffer went down, `decrease` when only some did) and a `ts` in Unix milliseconds, e.g.
+    `cnt read --watch --format jsonl | jq 'select(.event == "reset")'`.
 
 <img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
   

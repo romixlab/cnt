@@ -6,7 +6,7 @@
 mod load;
 
 use anyhow::anyhow;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -47,7 +47,7 @@ pub struct Counter {
     pub addr: u64,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 pub enum Storage {
     #[serde(rename = "ram")]
     Ram,
@@ -55,7 +55,7 @@ pub enum Storage {
     Bkp,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 pub enum Ty {
     #[serde(rename = "u32")]
     U32,
@@ -69,7 +69,7 @@ pub enum Value {
     U64(u64),
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Deserialize, Serialize)]
 pub enum Severity {
     #[serde(rename = "error")]
     Error,

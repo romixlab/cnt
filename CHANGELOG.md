@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). All crates in the workspace (`cnt`, `cnt_macro`, `cnt_core`,
 `cnt_cli`) share one version.
 
+## [Unreleased]
+
+### Added
+
+- `cnt_cli`: `--format json|jsonl` (or `CNT_FORMAT`) for `list`, `read` and `reset`, for use from scripts, CI and
+  agents. `json` prints one document with a list of blocks (storage, address, size, used and free bytes, counters),
+  `jsonl` one object per counter with its `storage`. Counters have a `value` when read from a target.
+- `cnt_cli`: `read --watch [--interval <MS>]` polls the target and prints counters whose value changed, with their
+  current value. In `jsonl` lines carry `event` (`initial`/`change`, `reset` when all non-zero counters of a buffer
+  decreased, `decrease` when only some did) and `ts` (Unix milliseconds).
+- `cnt_core`: `Storage`, `Ty` and `Severity` implement `Serialize`.
+
 ## [0.4.0] - 2026-09-29
 
 ### Breaking changes

@@ -1,16 +1,20 @@
 mod cargo_config;
 mod elf;
 pub(crate) mod list;
+mod output;
 mod probe;
 mod read;
 pub mod reset;
 
 use crate::theme::theme;
 use anstream::{eprintln, println};
+use anyhow::bail;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
-use cnt_core::Counters;
+use cnt_core::{Counters, Storage};
+pub(crate) use output::Format;
 use probe::ProbeOptions;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(version)]
@@ -22,6 +26,10 @@ use std::path::{Path, PathBuf};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+
+    /// Output format of `list`, `read` and `reset`. JSON goes to stdout, diagnostics to stderr
+    #[arg(long, global = true, value_enum, default_value_t, env = "CNT_FORMAT")]
+    pub format: Format,
 }
 
 impl Cli {
@@ -66,6 +74,13 @@ pub(crate) enum Command {
     List(Elf),
     /// Read counters from a connected target using probe-rs
     Read {
+        /// Keep reading and print counters whose value changed, until interrupted. All counters are printed first,
+        /// lower values are reported as a reset if all counters of the buffer went down, and as a decrease otherwise
+        #[arg(long)]
+        watch: bool,
+        /// Time between reads in watch mode, in milliseconds
+        #[arg(long, default_value_t = 100, requires = "watch")]
+        interval: u64,
         #[command(flatten)]
         elf: Elf,
         #[command(flatten)]
@@ -101,30 +116,77 @@ impl Command {
     }
 }
 
-pub fn process_cmd(cmd: Command, mut counters: Counters, elf_path: &Path) -> anyhow::Result<()> {
+pub fn process_cmd(
+    cmd: Command,
+    format: Format,
+    mut counters: Counters,
+    elf_path: &Path,
+) -> anyhow::Result<()> {
     match cmd {
         Command::List(_) => {
-            list::list(&counters);
+            if format == Format::Text {
+                list::list(&counters);
+            } else {
+                output::counters(format, &counters, elf_path)?;
+            }
+        }
+        Command::Read {
+            watch: true,
+            interval,
+            probe,
+            ..
+        } => {
+            if format == Format::Json {
+                bail!("--watch prints a stream of changes, use --format jsonl or text");
+            }
+            let mut session = probe.attach(elf_path)?;
+            let mut core = session.core(0)?;
+            read::watch(
+                &mut counters,
+                &mut core,
+                format,
+                Duration::from_millis(interval),
+            )?;
         }
         Command::Read { probe, .. } => {
             let mut session = probe.attach(elf_path)?;
-            let core = session.core(0)?;
-            read::read(&mut counters, core)?;
+            let mut core = session.core(0)?;
+            read::read(&mut counters, &mut core)?;
+            if format == Format::Text {
+                read::print(&counters);
+            } else {
+                output::counters(format, &counters, elf_path)?;
+            }
         }
         Command::Reset { bkp, probe, .. } => {
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
             let hint = theme().hint;
+            let mut done = vec![];
             if let Some(block) = counters.ram_counters() {
-                println!("{hint}Resetting RAM counters{hint:#}");
+                if format == Format::Text {
+                    println!("{hint}Resetting RAM counters{hint:#}");
+                }
                 reset::reset(block, &mut core)?;
+                done.push(Storage::Ram);
             }
             if bkp && let Some(block) = counters.bkp_counters() {
-                println!("{hint}Resetting BKP counters{hint:#}");
+                if format == Format::Text {
+                    println!("{hint}Resetting BKP counters{hint:#}");
+                }
                 reset::reset(block, &mut core)?;
+                done.push(Storage::Bkp);
+            }
+            if format != Format::Text {
+                output::reset(format, &done)?;
             }
         }
         Command::Tui { probe, .. } => {
+            if format != Format::Text {
+                bail!(
+                    "The TUI only supports text output, use `cnt read --format json|jsonl` instead"
+                );
+            }
             let mut session = probe.attach(elf_path)?;
             let mut core = session.core(0)?;
             crate::tui::tui(&mut counters, &mut core)?;
