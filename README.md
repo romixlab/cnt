@@ -84,6 +84,13 @@ fn main() {
 
 `u64` counters occupy two words, low word first, and might be torn if read while being incremented.
 
+## Host builds
+
+Code using counters also builds and runs on a host (any `target_os` other than `none`), e.g. in unit tests. There is no
+`cnt.x` there, so each counter gets its words in the buffer when it is first incremented: counting works and
+`counters_ram_buffer`/`counters_bkp_buffer` return the values, in order of first use. The BKP buffer is an ordinary
+static of 64 words on a host, unless `CNT_BKP_BUFFER_SIZE_WORDS` is set.
+
 ## Advanced usage
 
 ### Any expression can be used instead of 1

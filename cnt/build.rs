@@ -12,7 +12,13 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let ram_size = size_words("CNT_RAM_BUFFER_SIZE_WORDS", DEFAULT_RAM_SIZE_WORDS);
-    let bkp_size = size_words("CNT_BKP_BUFFER_SIZE_WORDS", 0);
+    // There is no BKP memory region to place the buffer in on a host, so it is an ordinary static there and need not
+    // be opted into
+    let host = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os != "none");
+    let bkp_size = size_words(
+        "CNT_BKP_BUFFER_SIZE_WORDS",
+        if host { DEFAULT_RAM_SIZE_WORDS } else { 0 },
+    );
     let bkp_region =
         env::var("CNT_BKP_MEMORY_REGION").unwrap_or_else(|_| DEFAULT_BKP_REGION.to_string());
 
@@ -26,7 +32,7 @@ fn main() {
             /// Can be customized by setting the `CNT_RAM_BUFFER_SIZE_WORDS` environment variable.
             pub(crate) const RAM_BUF_SIZE: usize = {ram_size};
 
-            /// BKP counters buffer size in 32-bit words (default: 0).
+            /// BKP counters buffer size in 32-bit words (default: 0, {DEFAULT_RAM_SIZE_WORDS} on a host).
             ///
             /// Can be customized by setting the `CNT_BKP_BUFFER_SIZE_WORDS` environment variable.
             pub(crate) const BKP_BUF_SIZE: usize = {bkp_size};"

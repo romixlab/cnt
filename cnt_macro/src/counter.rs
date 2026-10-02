@@ -135,6 +135,7 @@ fn increment(args: &CounterArgs, storage: Storage) -> syn::Result<TokenStream> {
     let symbol = counter_symbol(&field, &group, &CallSite::here());
     let attrs = counter_marker_attrs(storage, &symbol);
     let words = ty.words();
+    let storage_tokens = storage.tokens();
 
     let increment_fn = Ident::new(
         &format!("saturating_add_{}_{}", ty.as_str(), storage.as_str()),
@@ -161,9 +162,9 @@ fn increment(args: &CounterArgs, storage: Storage) -> syn::Result<TokenStream> {
             {
                 // `#[used]` keeps the counter in the ELF even if the increment is optimized out
                 #attrs
-                static CNT_INDEX: [u8; #words] = [0; #words];
-                // The section is placed at address 0 by cnt.x, so the address is the index of the counter's first word
-                CNT_INDEX.as_ptr() as usize
+                static CNT_MARKER: [u8; #words] = [0; #words];
+                static CNT_INDEX: ::cnt::Index = ::cnt::Index::new();
+                CNT_INDEX.get(CNT_MARKER.as_ptr(), #words, ::cnt::Storage::#storage_tokens)
             },
             #rhs,
         );

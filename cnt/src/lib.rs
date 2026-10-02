@@ -66,7 +66,7 @@ pub struct Slot {
 
 /// A set of named counters, implemented by `#[derive(Count)]` on an enum with unit variants.
 ///
-/// ```no_run
+/// ```
 /// #[derive(cnt::Count)]
 /// enum FramerEvent {
 ///     CrcError,                                   // u32, info
@@ -93,7 +93,7 @@ pub trait Count {
 /// `static`. Library code takes a `&'static Counters<E>`, so the firmware decides how many instances there are and
 /// where they live:
 ///
-/// ```no_run
+/// ```
 /// # #[derive(cnt::Count)] enum FramerEvent { CrcError }
 /// # struct Framer { cnt: &'static cnt::Counters<FramerEvent> }
 /// # impl Framer { fn feed(&self) { self.cnt.count(FramerEvent::CrcError); } }
@@ -108,6 +108,8 @@ pub struct Counters<E: Count> {
     /// first word.
     #[cfg(not(feature = "disabled"))]
     slots: &'static u8,
+    #[cfg(not(feature = "disabled"))]
+    index: Index,
     storage: Storage,
     _event: PhantomData<fn(E)>,
 }
@@ -118,6 +120,7 @@ impl<E: Count> Counters<E> {
     pub const fn new(slots: &'static u8, storage: Storage) -> Self {
         Self {
             slots,
+            index: Index::new(),
             storage,
             _event: PhantomData,
         }
@@ -165,7 +168,7 @@ impl<E: Count> Counters<E> {
     pub fn add(&self, event: E, rhs: u64) {
         // The static holding `self` is immutable, so `storage` and `slot` fold to constants after inlining
         let Slot { word, ty } = event.slot();
-        let idx = self.slots as *const u8 as usize + word;
+        let idx = self.index.get(self.slots, E::WORDS, self.storage) + word;
         match (self.storage, ty) {
             (Storage::Ram, Ty::U32) => saturating_add_u32_ram(idx, saturate_u32(rhs)),
             (Storage::Bkp, Ty::U32) => saturating_add_u32_bkp(idx, saturate_u32(rhs)),
