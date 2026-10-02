@@ -168,13 +168,64 @@ impl<E: Count> Counters<E> {
     pub fn add(&self, event: E, rhs: u64) {
         // The static holding `self` is immutable, so `storage` and `slot` fold to constants after inlining
         let Slot { word, ty } = event.slot();
-        let idx = self.index.get(self.slots, E::WORDS, self.storage) + word;
+        let idx = self.first_word() + word;
         match (self.storage, ty) {
             (Storage::Ram, Ty::U32) => saturating_add_u32_ram(idx, saturate_u32(rhs)),
             (Storage::Bkp, Ty::U32) => saturating_add_u32_bkp(idx, saturate_u32(rhs)),
             (Storage::Ram, Ty::U64) => saturating_add_u64_ram(idx, rhs),
             (Storage::Bkp, Ty::U64) => saturating_add_u64_bkp(idx, rhs),
         }
+    }
+
+    /// Current value of a counter, e.g. to assert on it in a test running on the target, or to report it from the
+    /// firmware.
+    ///
+    /// ```
+    /// # #[derive(cnt::Count)] enum FramerEvent { CrcError }
+    /// static CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, test);
+    ///
+    /// CNT.count(FramerEvent::CrcError);
+    /// assert_eq!(CNT.get(FramerEvent::CrcError), 1);
+    /// ```
+    ///
+    /// A u64 counter read from an interrupt that preempted an increment of the same counter may be torn.
+    #[cfg(not(feature = "disabled"))]
+    #[inline(always)]
+    pub fn get(&self, event: E) -> u64 {
+        let Slot { word, ty } = event.slot();
+        let idx = self.first_word() + word;
+        match ty {
+            Ty::U32 => load_u32(self.storage, idx).into(),
+            Ty::U64 => load_u64(self.storage, idx),
+        }
+    }
+
+    /// Current value of a counter, always 0 with the `disabled` feature.
+    #[cfg(feature = "disabled")]
+    #[inline(always)]
+    pub fn get(&self, event: E) -> u64 {
+        let _ = event;
+        0
+    }
+
+    /// Set all counters of this instance to 0. An increment running concurrently, e.g. in an interrupt, may be lost
+    /// or survive the clear.
+    #[cfg(not(feature = "disabled"))]
+    #[inline(always)]
+    pub fn clear(&self) {
+        buffers::clear(self.storage, self.first_word(), E::WORDS);
+    }
+
+    /// Set all counters of this instance to 0, a no-op with the `disabled` feature.
+    #[cfg(feature = "disabled")]
+    #[inline(always)]
+    pub fn clear(&self) {}
+
+    /// Index of the first word of this instance in its buffer.
+    #[cfg(not(feature = "disabled"))]
+    #[inline(always)]
+    fn first_word(&self) -> usize {
+        self.index.get(self.slots, E::WORDS, self.storage)
     }
 }
 

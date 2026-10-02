@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   shows a progress bar per operation (erase, program, verify) on a terminal.
 - `cnt_cli`: `q` (or Esc) stops `read --watch` and `cnt run` when stdin is a terminal, like Ctrl+C.
 - `cnt_core`: `Storage`, `Ty` and `Severity` implement `Serialize`.
+- `cnt`: `Counters::get(event)` reads a counter and `Counters::clear()` sets all counters of an instance to 0, so that
+  firmware and tests running on the target (e.g. with embedded-test, where probe-rs holds the probe) can check counter
+  values. u64 counters are read without tearing unless the read preempts an increment of the same counter.
 
 ### Fixed
 

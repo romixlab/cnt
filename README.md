@@ -84,6 +84,35 @@ fn main() {
 
 `u64` counters occupy two words, low word first, and might be torn if read while being incremented.
 
+Instance counters (see [Instance counters](#instance-counters)) can be read by name with `get`, and set back to 0 with
+`clear`:
+
+```rust
+let crc_errors: u64 = UART1_FRAMER_CNT.get(FramerEvent::CrcError);
+UART1_FRAMER_CNT.clear();
+```
+
+## Tests on the target (embedded-test)
+
+While `cargo test` runs on the target, e.g. with [embedded-test](https://crates.io/crates/embedded-test), probe-rs
+holds the probe, so the CLI cannot read the counters. Assert on them in the test instead: give the code under test its
+own instance counters and check them with `get`. The target is reset before every test, so each test starts with all
+RAM counters at 0.
+
+```rust
+static CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, test);
+
+#[test]
+fn bad_crc_is_counted() {
+    let mut framer = Framer::new(&CNT);
+    framer.feed_frame(&BAD_CRC);
+    assert_eq!(CNT.get(FramerEvent::CrcError), 1);
+}
+```
+
+`cnt!` call-site counters have no handle and cannot be read like this, use instance counters for anything a test
+should check. The same tests also work on a host (see [Host builds](#host-builds)).
+
 ## Host builds
 
 Code using counters also builds and runs on a host (any `target_os` other than `none`), e.g. in unit tests. There is no
