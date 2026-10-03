@@ -2,6 +2,9 @@ use std::{env, fs, path::PathBuf};
 
 /// Default RAM counters buffer size in 32-bit words.
 const DEFAULT_RAM_SIZE_WORDS: usize = 64;
+/// Default size of both buffers in 32-bit words on a host. Memory is cheap there, and tests running in parallel
+/// threads each need their own `Counters` statics, which add up.
+const DEFAULT_HOST_SIZE_WORDS: usize = 100 * DEFAULT_RAM_SIZE_WORDS;
 /// Memory region in which the BKP counters buffer is placed, unless overridden by `CNT_BKP_MEMORY_REGION`.
 const DEFAULT_BKP_REGION: &str = "BKPSRAM";
 
@@ -11,13 +14,20 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CNT_BKP_MEMORY_REGION");
     println!("cargo:rerun-if-changed=build.rs");
 
-    let ram_size = size_words("CNT_RAM_BUFFER_SIZE_WORDS", DEFAULT_RAM_SIZE_WORDS);
+    let host = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os != "none");
+    let ram_size = size_words(
+        "CNT_RAM_BUFFER_SIZE_WORDS",
+        if host {
+            DEFAULT_HOST_SIZE_WORDS
+        } else {
+            DEFAULT_RAM_SIZE_WORDS
+        },
+    );
     // There is no BKP memory region to place the buffer in on a host, so it is an ordinary static there and need not
     // be opted into
-    let host = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os != "none");
     let bkp_size = size_words(
         "CNT_BKP_BUFFER_SIZE_WORDS",
-        if host { DEFAULT_RAM_SIZE_WORDS } else { 0 },
+        if host { DEFAULT_HOST_SIZE_WORDS } else { 0 },
     );
     let bkp_region =
         env::var("CNT_BKP_MEMORY_REGION").unwrap_or_else(|_| DEFAULT_BKP_REGION.to_string());
@@ -27,12 +37,12 @@ fn main() {
     fs::write(
         out_dir.join("consts.rs"),
         format!(
-            "/// RAM counters buffer size in 32-bit words (default: {DEFAULT_RAM_SIZE_WORDS}).
+            "/// RAM counters buffer size in 32-bit words (default: {DEFAULT_RAM_SIZE_WORDS}, {DEFAULT_HOST_SIZE_WORDS} on a host).
             ///
             /// Can be customized by setting the `CNT_RAM_BUFFER_SIZE_WORDS` environment variable.
             pub(crate) const RAM_BUF_SIZE: usize = {ram_size};
 
-            /// BKP counters buffer size in 32-bit words (default: 0, {DEFAULT_RAM_SIZE_WORDS} on a host).
+            /// BKP counters buffer size in 32-bit words (default: 0, {DEFAULT_HOST_SIZE_WORDS} on a host).
             ///
             /// Can be customized by setting the `CNT_BKP_BUFFER_SIZE_WORDS` environment variable.
             pub(crate) const BKP_BUF_SIZE: usize = {bkp_size};"

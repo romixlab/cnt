@@ -32,8 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Host builds (any `target_os` other than `none`, e.g. unit tests of a firmware or driver crate) no longer panic with
   an out of bounds index on the first count. Without `cnt.x` counter words are now allocated from the buffer on first
-  use, so counters work and can be read with `counters_ram_buffer`/`counters_bkp_buffer`. The BKP buffer defaults to
-  64 words on a host. Doc examples run instead of being `no_run`.
+  use, so counters work and can be read with `counters_ram_buffer`/`counters_bkp_buffer`. Both buffers default to
+  6400 words on a host, enough for tests running in parallel to each use their own `Counters` statics, as the README
+  now recommends. Doc examples run instead of being `no_run`.
 
 ## [0.4.0] - 2026-09-29
 

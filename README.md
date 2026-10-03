@@ -38,7 +38,7 @@ Library crates can count per instance, see [Instance counters](#instance-counter
 
 * Add `cnt = "0.3"` to `Cargo.toml` (the dependency must not be renamed, generated code refers to `cnt`)
 * Add `"-C", "link-arg=-Tcnt.x",` to `.cargo/config.toml`
-* Optionally set `CNT_RAM_BUFFER_SIZE_WORDS` in the `[env]` section as well, default value is 64 words (256 bytes).
+* Optionally set `CNT_RAM_BUFFER_SIZE_WORDS` in the `[env]` section as well, default value is 64 words (256 bytes, 6400 words on a host).
   Linking fails with a `cnt: too many RAM counters` error if the buffer is too small for the counters in use.
 * Flash your firmware and run the CLI tool:
   * To read once: `cnt read --chip <CHIP> <PATH_TO_ELF>`
@@ -96,29 +96,35 @@ UART1_FRAMER_CNT.clear();
 
 While `cargo test` runs on the target, e.g. with [embedded-test](https://crates.io/crates/embedded-test), probe-rs
 holds the probe, so the CLI cannot read the counters. Assert on them in the test instead: give the code under test its
-own instance counters and check them with `get`. The target is reset before every test, so each test starts with all
-RAM counters at 0.
+own instance counters and check them with `get`. Give each test its own `Counters` static, declared inside the test:
 
 ```rust
-static CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, test);
-
 #[test]
 fn bad_crc_is_counted() {
+    static CNT: cnt::Counters<FramerEvent> = cnt::counters!(FramerEvent, bad_crc);
     let mut framer = Framer::new(&CNT);
     framer.feed_frame(&BAD_CRC);
     assert_eq!(CNT.get(FramerEvent::CrcError), 1);
 }
 ```
 
-`cnt!` call-site counters have no handle and cannot be read like this, use instance counters for anything a test
-should check. The same tests also work on a host (see [Host builds](#host-builds)).
+The target is reset before every test, so there one shared static would also start at 0. On a host (see
+[Host builds](#host-builds)) the tests of a binary run in parallel threads of one process, so tests sharing a static
+count into the same counters and exact asserts fail at random; neither `clear()` at the start of a test nor comparing
+values before and after helps against that. With one static per test the same tests pass on both.
+
+This only works if the code under test takes its `&'static Counters<E>` from the caller. `cnt!` call-site counters and
+`Counters` statics private to the code under test have no handle a test can choose: they are shared by all tests and
+`cnt!` counters cannot be read with `get` at all, so use injected instance counters for anything a test should check.
 
 ## Host builds
 
 Code using counters also builds and runs on a host (any `target_os` other than `none`), e.g. in unit tests. There is no
 `cnt.x` there, so each counter gets its words in the buffer when it is first incremented: counting works and
-`counters_ram_buffer`/`counters_bkp_buffer` return the values, in order of first use. The BKP buffer is an ordinary
-static of 64 words on a host, unless `CNT_BKP_BUFFER_SIZE_WORDS` is set.
+`counters_ram_buffer`/`counters_bkp_buffer` return the values, in order of first use. Both buffers are ordinary statics
+of 6400 words on a host, unless `CNT_RAM_BUFFER_SIZE_WORDS`/`CNT_BKP_BUFFER_SIZE_WORDS` is set, so that every test can
+have its own `Counters` statics (see [Tests on the target](#tests-on-the-target-embedded-test)). Counting panics with
+`cnt: too many RAM counters` when a buffer is full.
 
 ## Advanced usage
 
