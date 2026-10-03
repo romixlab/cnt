@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-03
+
 ### Added
 
 - `cnt_cli`: `--format json|jsonl` (or `CNT_FORMAT`) for `list`, `read` and `reset`, for use from scripts, CI and
@@ -30,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `cnt` depends on the exact `cnt_macro` version, as the generated code uses items new in `cnt` 0.4.1. `cnt` 0.4.0
+  together with `cnt_macro` 0.4.1 does not compile.
 - Host builds (any `target_os` other than `none`, e.g. unit tests of a firmware or driver crate) no longer panic with
   an out of bounds index on the first count. Without `cnt.x` counter words are now allocated from the buffer on first
   use, so counters work and can be read with `counters_ram_buffer`/`counters_bkp_buffer`. Both buffers default to
@@ -148,7 +152,9 @@ Initial release, extracted from `embedded_bedrock`.
 - `cnt_cli`: `list`, `read`, `reset` and a ratatui-based `tui` reading counters from a target with probe-rs,
   human-readable byte values.
 
-[Unreleased]: https://github.com/romixlab/cnt/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/romixlab/cnt/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/romixlab/cnt/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/romixlab/cnt/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/romixlab/cnt/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/romixlab/cnt/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/romixlab/cnt/releases/tag/v0.1.0

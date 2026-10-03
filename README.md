@@ -36,7 +36,7 @@ Library crates can count per instance, see [Instance counters](#instance-counter
 
 ## How to use
 
-* Add `cnt = "0.3"` to `Cargo.toml` (the dependency must not be renamed, generated code refers to `cnt`)
+* Add `cnt = "0.4"` to `Cargo.toml` (the dependency must not be renamed, generated code refers to `cnt`)
 * Add `"-C", "link-arg=-Tcnt.x",` to `.cargo/config.toml`
 * Optionally set `CNT_RAM_BUFFER_SIZE_WORDS` in the `[env]` section as well, default value is 64 words (256 bytes, 6400 words on a host).
   Linking fails with a `cnt: too many RAM counters` error if the buffer is too small for the counters in use.

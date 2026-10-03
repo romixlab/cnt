@@ -402,14 +402,14 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cnt"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cnt_macro",
 ]
 
 [[package]]
 name = "cnt_cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "cnt_core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "object 0.40.0",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "cnt_macro"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cnt",
  "proc-macro2",
