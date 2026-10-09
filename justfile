@@ -1,5 +1,9 @@
 bin_dir := env_var("HOME") / ".local/bin"
 
+# Bare `just` only lists the recipes
+default:
+    @just --list
+
 # Build cnt CLI in release mode and install it into ~/.local/bin
 install-local:
     #!/usr/bin/env bash

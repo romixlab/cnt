@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `justfile` gets a `default` recipe (`@just --list`), so a bare `just` only lists the recipes instead of
+  running `install-local`.
+
 ## [0.4.1] - 2026-10-03
 
 ### Added
