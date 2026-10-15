@@ -19,8 +19,12 @@ pub const DISABLED: bool = true;
 #[cfg(not(feature = "disabled"))]
 pub const DISABLED: bool = false;
 
-/// Identifies the buffer layout to host tools: magic followed by the format version (little-endian u16). Bump the
-/// version when the counters encoding changes in an incompatible way.
+/// Version of the buffer layout and marker format host tools read, the one in `_CNT_SIGNATURE`. Bumped when the
+/// counters encoding changes in an incompatible way. Devices report it to hosts reading their buffers over another
+/// path than a debug probe (e.g. `ww_counters`).
+pub const SIGNATURE_VERSION: u16 = 2;
+
+/// Identifies the buffer layout to host tools: magic followed by the format version (little-endian u16).
 #[cfg(not(feature = "disabled"))]
 #[used]
 #[unsafe(no_mangle)]
@@ -29,7 +33,34 @@ pub const DISABLED: bool = false;
     not(target_os = "macos"),
     unsafe(link_section = ".rodata.cnt_signature")
 )]
-static _CNT_SIGNATURE: [u8; 8] = *b"CNTRS\0\x02\0";
+static _CNT_SIGNATURE: [u8; 8] = {
+    let v = SIGNATURE_VERSION.to_le_bytes();
+    [b'C', b'N', b'T', b'R', b'S', 0, v[0], v[1]]
+};
+
+/// No buffers with the `disabled` feature: empty, so code reading them (e.g. serving them to a host) still compiles.
+#[cfg(feature = "disabled")]
+pub fn counters_ram_buffer() -> &'static [core::sync::atomic::AtomicU32] {
+    &[]
+}
+
+/// See [`counters_ram_buffer`].
+#[cfg(feature = "disabled")]
+pub fn counters_bkp_buffer() -> &'static [core::sync::atomic::AtomicU32] {
+    &[]
+}
+
+/// Always 0 with the `disabled` feature.
+#[cfg(feature = "disabled")]
+pub fn ram_used_words() -> usize {
+    0
+}
+
+/// Always 0 with the `disabled` feature.
+#[cfg(feature = "disabled")]
+pub fn bkp_used_words() -> usize {
+    0
+}
 
 /// Where a counter lives.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

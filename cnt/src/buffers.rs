@@ -118,6 +118,46 @@ impl Index {
     }
 }
 
+/// Words of the RAM buffer taken by counters: the words past it are never written. Host tools read only these.
+///
+/// In firmware it is fixed at link time (`__RAM_COUNTERS_MARKER_END` of `cnt.x`), on a host it grows as counters are
+/// first used.
+#[inline(always)]
+pub fn ram_used_words() -> usize {
+    used_words(Storage::Ram)
+}
+
+/// Words of the BKP buffer taken by counters, see [`ram_used_words`].
+#[inline(always)]
+pub fn bkp_used_words() -> usize {
+    used_words(Storage::Bkp)
+}
+
+#[cfg(target_os = "none")]
+#[inline(always)]
+fn used_words(storage: Storage) -> usize {
+    unsafe extern "C" {
+        static __RAM_COUNTERS_MARKER_END: u8;
+        static __BKP_COUNTERS_MARKER_END: u8;
+    }
+    // The marker sections are placed at 0 by cnt.x, so the end symbol's address is the number of words in use
+    match storage {
+        Storage::Ram => core::ptr::addr_of!(__RAM_COUNTERS_MARKER_END) as usize,
+        Storage::Bkp => core::ptr::addr_of!(__BKP_COUNTERS_MARKER_END) as usize,
+    }
+}
+
+#[cfg(not(target_os = "none"))]
+#[inline(always)]
+fn used_words(storage: Storage) -> usize {
+    let (next, size) = match storage {
+        Storage::Ram => (&HOST_RAM_NEXT, RAM_BUF_SIZE),
+        Storage::Bkp => (&HOST_BKP_NEXT, BKP_BUF_SIZE),
+    };
+    // Past the size only after a failed allocation, which panicked
+    next.load(Ordering::Relaxed).min(size)
+}
+
 /// RAM counters, as 32-bit words. u64 counters occupy two words, low word first.
 ///
 /// Values keep changing while the slice is alive, read them with [`AtomicU32::load`] (`Relaxed` is enough). A u64

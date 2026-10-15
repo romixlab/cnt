@@ -1,0 +1,9 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tcnt.x", "-C", "link-arg=--build-id=sha1", "-C", "link-arg=-zmax-page-size=4096"]
+
+[env]
+CNT_RAM_BUFFER_SIZE_WORDS = "16"
+CNT_BKP_BUFFER_SIZE_WORDS = "8"

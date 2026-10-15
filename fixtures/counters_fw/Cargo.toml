@@ -1,0 +1,19 @@
+[package]
+name = "counters_fw"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Test firmware whose ELF host tests decode counters with (tests/fixtures/counters_fw.elf)"
+
+# Not part of the cnt workspace: built for a Cortex-M target only
+[workspace]
+
+[dependencies]
+cnt = { path = "../../cnt" }
+cortex-m-rt = "0.7"
+panic-halt = "1.0"
+
+[profile.release]
+opt-level = "s"
+debug = false
+codegen-units = 1

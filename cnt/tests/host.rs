@@ -34,4 +34,7 @@ fn counters_are_allocated_on_first_use() {
     let ram = read(cnt::counters_ram_buffer());
     assert_eq!(ram[..12], [3, 5, 1, 1, 7, 0, 0, 0, 0, 0, 2, 0]);
     assert_eq!(read(cnt::counters_bkp_buffer())[..2], [4, 0]);
+    // calls, bytes (2), FIRST (4), SECOND (4)
+    assert_eq!(cnt::ram_used_words(), 11);
+    assert_eq!(cnt::bkp_used_words(), 1);
 }

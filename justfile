@@ -16,3 +16,8 @@ install-local:
     mkdir -p "{{bin_dir}}"
     install -m 755 target/release/cnt "{{bin_dir}}/cnt"
     echo "installed $("{{bin_dir}}/cnt" --version 2>/dev/null || echo cnt) -> {{bin_dir}}/cnt"
+
+# Rebuild the test firmware whose ELF the cnt_core tests decode
+fixtures:
+    cd fixtures/counters_fw && cargo build --release
+    cp fixtures/counters_fw/target/thumbv7em-none-eabihf/release/counters_fw cnt_core/tests/fixtures/counters_fw.elf

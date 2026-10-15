@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `cnt`: `ram_used_words()` and `bkp_used_words()`, the words of each buffer taken by counters (fixed at link time
+  in firmware, from `__RAM_COUNTERS_MARKER_END` / `__BKP_COUNTERS_MARKER_END`), and `SIGNATURE_VERSION`, the format
+  version in `_CNT_SIGNATURE`. Firmware serving its counters over another path than a probe (`ww_counters`) reports
+  them. With the `disabled` feature these are 0 and `counters_ram_buffer()` / `counters_bkp_buffer()` are empty, so
+  such code compiles either way.
+- `fixtures/counters_fw`: a test firmware (Cortex-M, build id in flash) whose ELF the host tests decode,
+  `just fixtures` rebuilds `cnt_core/tests/fixtures/counters_fw.elf`.
+
 ### Changed
 
 - `justfile` gets a `default` recipe (`@just --list`), so a bare `just` only lists the recipes instead of
