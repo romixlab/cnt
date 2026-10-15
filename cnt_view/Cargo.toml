@@ -4,6 +4,8 @@ description = "Terminal views of cnt counters (list, read, watch, TUI, JSON) ove
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+# The TUI test reads cnt_core's fixture ELF, which is not in this package
+exclude = ["tests/"]
 license.workspace = true
 repository.workspace = true
 version.workspace = true
