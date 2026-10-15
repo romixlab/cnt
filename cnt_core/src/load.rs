@@ -165,7 +165,7 @@ struct Layout {
 
 /// Format version understood by this crate, see `_CNT_SIGNATURE` in the `cnt` crate.
 const SIGNATURE_MAGIC: &[u8] = b"CNTRS\0";
-const SIGNATURE_VERSION: u16 = 2;
+pub const SIGNATURE_VERSION: u16 = 2;
 
 struct Loader<'e, 'd> {
     elf: &'e File<'d>,

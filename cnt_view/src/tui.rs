@@ -31,6 +31,27 @@ const HIGHLIGHT_SYMBOL: &str = "▶ ";
 const HIGHLIGHT_SYMBOL_WIDTH: u16 = 2;
 const COLUMN_SPACING: u16 = 2;
 
+/// Read the counters (and logs) once and draw one frame of the TUI on `terminal`: to embed the view, or to check
+/// what it shows with ratatui's `TestBackend`.
+pub fn draw_once<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+    counters: &mut Counters,
+    source: &mut dyn Source,
+    title: &str,
+) -> anyhow::Result<()>
+where
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
+    let mut app = App::new(counters, source.logs_attached().is_some(), title);
+    app.refresh(source);
+    app.poll_logs(source);
+    if let Some(e) = &app.read_error {
+        anyhow::bail!("{e}");
+    }
+    terminal.draw(|frame| app.render(frame))?;
+    Ok(())
+}
+
 /// Run the TUI until the user quits. `title` names where the counters come from (shown in the title line), the
 /// source is closed at the end, also after an error.
 pub fn tui(counters: &mut Counters, source: &mut dyn Source, title: &str) -> anyhow::Result<()> {

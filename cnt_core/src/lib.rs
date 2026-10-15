@@ -8,6 +8,7 @@ pub mod elf;
 mod load;
 mod source;
 
+pub use load::SIGNATURE_VERSION;
 pub use source::{Change, Event, Source};
 
 use anyhow::anyhow;

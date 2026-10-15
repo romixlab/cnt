@@ -27,7 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cnt_core`: `Counters::from_elf(bytes)`, `Log` (a firmware log message for the views), `CountersBlock::value`,
   `capacity_words`.
 - `cnt_view`: new crate with the terminal views of the CLI (list, read, `read --watch`, the TUI, JSON output, theme)
-  over any `Source`, so `ww counters` shows the same over WireWeaver.
+  over any `Source`, so `ww counters` shows the same over WireWeaver. `tui::draw_once` draws one frame on any
+  ratatui terminal (embedding, tests with `TestBackend`).
 - `cnt_cli`: `read`, `tui` and `reset` read the build id note from the target's flash and refuse an ELF of other
   firmware (`--force` to use it anyway). Without an ELF argument, the ELF with the target's build id is used if
   `target/`, `WW_ELF_PATH` or `~/.cache/ww/elf` has it.
