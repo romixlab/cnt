@@ -1,9 +1,9 @@
 //! `cnt run`: flash the firmware and restart the target, like `probe-rs run`.
 
 use super::logs::DefmtReader;
-use crate::theme::theme;
 use anstream::{eprint, eprintln};
 use anyhow::Context;
+use cnt_view::theme;
 use human_repr::HumanCount;
 use probe_rs::Session;
 use probe_rs::flashing::{

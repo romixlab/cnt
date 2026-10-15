@@ -1,12 +1,12 @@
-use crate::cli::list::severity_label;
-use crate::cli::logs::{DefmtReader, Log};
-use crate::cli::reset::reset;
+//! The terminal UI: a table per buffer, values highlighted as they change, the firmware's logs below.
+
+use crate::list::severity_label;
+use crate::read::level_label;
 use crate::theme::theme;
 use anstream::println;
-use cnt_core::{Counter, Counters, CountersBlock, Severity, Storage, Value};
+use cnt_core::{Counter, Counters, CountersBlock, Event, Log, Severity, Source, Storage, Value};
 use crossterm::event::{self, KeyCode, KeyEvent, KeyModifiers};
 use human_repr::HumanCount;
-use probe_rs::{Core, MemoryInterface};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -17,7 +17,7 @@ use ratatui::widgets::{
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-/// How often counters are read from the target.
+/// How often counters are read.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 /// How often defmt logs are read. RTT buffers are small, and the firmware blocks when they are full.
 const LOG_INTERVAL: Duration = Duration::from_millis(10);
@@ -31,19 +31,17 @@ const HIGHLIGHT_SYMBOL: &str = "▶ ";
 const HIGHLIGHT_SYMBOL_WIDTH: u16 = 2;
 const COLUMN_SPACING: u16 = 2;
 
-pub fn tui(
-    counters: &mut Counters,
-    core: &mut Core,
-    defmt: Option<DefmtReader>,
-) -> anyhow::Result<()> {
+/// Run the TUI until the user quits. `title` names where the counters come from (shown in the title line), the
+/// source is closed at the end, also after an error.
+pub fn tui(counters: &mut Counters, source: &mut dyn Source, title: &str) -> anyhow::Result<()> {
     if counters.is_empty() {
         let hint = theme().hint;
         println!("{hint}No counters found{hint:#}");
         return Ok(());
     }
 
-    let mut app = App::new(counters, defmt);
-    app.refresh(core);
+    let mut app = App::new(counters, source.logs_attached().is_some(), title);
+    app.refresh(source);
     let result: std::io::Result<()> = ratatui::run(|terminal| {
         let mut last_refresh = Instant::now();
         let mut redraw = true;
@@ -53,49 +51,55 @@ pub fn tui(
                 redraw = false;
             }
             let mut timeout = REFRESH_INTERVAL.saturating_sub(last_refresh.elapsed());
-            if app.defmt.is_some() {
+            if app.has_logs {
                 timeout = timeout.min(LOG_INTERVAL);
             }
             if event::poll(timeout)? {
                 if let Some(key) = event::read()?.as_key_press_event()
-                    && !app.handle_key(key, core)
+                    && !app.handle_key(key, source)
                 {
                     return Ok(());
                 }
                 // Key presses and resizes
                 redraw = true;
             }
-            redraw |= app.poll_logs(core);
+            redraw |= app.poll_logs(source);
             if last_refresh.elapsed() >= REFRESH_INTERVAL {
-                app.refresh(core);
+                app.refresh(source);
                 last_refresh = Instant::now();
                 redraw = true;
             }
         }
     });
+    drop(app);
     // Also after errors, as the firmware blocks on a full log buffer otherwise
-    let detached = app.defmt.as_mut().map_or(Ok(()), |d| d.detach(core));
+    let closed = source.close();
     result?;
-    detached
+    closed
 }
 
 /// A table of RAM or BKP counters.
-struct Panel<'a> {
-    counters: &'a mut CountersBlock,
+struct Panel {
+    storage: Storage,
     state: TableState,
 }
 
 struct App<'a> {
-    panels: Vec<Panel<'a>>,
+    counters: &'a mut Counters,
+    panels: Vec<Panel>,
+    title: String,
     /// Index of the panel receiving navigation keys
     focus: usize,
-    /// When each counter last changed, keyed by its address in target memory
-    changed: HashMap<u64, Instant>,
+    /// When each counter last changed, keyed by its storage and index
+    changed: HashMap<(Storage, u64), Instant>,
     /// Outcome of the last user action
     status: Option<Status>,
     /// Last failed read, cleared on the next successful one
     read_error: Option<String>,
-    defmt: Option<DefmtReader>,
+    /// The source carries logs: they get a panel
+    has_logs: bool,
+    /// Logs are received, not waiting for the firmware to set them up
+    logs_attached: bool,
     logs: VecDeque<Log>,
     /// Last failed log read, cleared on the next successful one
     log_error: Option<String>,
@@ -107,28 +111,31 @@ enum Status {
 }
 
 impl<'a> App<'a> {
-    fn new(counters: &'a mut Counters, defmt: Option<DefmtReader>) -> Self {
+    fn new(counters: &'a mut Counters, has_logs: bool, title: &str) -> Self {
         let panels = counters
-            .blocks_mut()
-            .map(|counters| Panel {
-                counters,
+            .blocks()
+            .map(|b| Panel {
+                storage: b.storage(),
                 state: TableState::default().with_selected(0),
             })
             .collect();
         App {
+            counters,
             panels,
+            title: title.to_string(),
             focus: 0,
             changed: HashMap::new(),
             status: None,
             read_error: None,
-            defmt,
+            has_logs,
+            logs_attached: false,
             logs: VecDeque::new(),
             log_error: None,
         }
     }
 
     /// Returns false when the TUI should exit.
-    fn handle_key(&mut self, key: KeyEvent, core: &mut Core) -> bool {
+    fn handle_key(&mut self, key: KeyEvent, source: &mut dyn Source) -> bool {
         let state = &mut self.panels[self.focus].state;
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return false,
@@ -142,57 +149,66 @@ impl<'a> App<'a> {
             KeyCode::PageUp => state.scroll_up_by(10),
             KeyCode::Char('g') | KeyCode::Home => state.select_first(),
             KeyCode::Char('G') | KeyCode::End => state.select_last(),
-            KeyCode::Char('r') => self.reset(Storage::Ram, core),
+            KeyCode::Char('r') => self.reset(Storage::Ram, source),
             // Separate key, as BKP counters are meant to survive resets and power loss
-            KeyCode::Char('R') => self.reset(Storage::Bkp, core),
+            KeyCode::Char('R') => self.reset(Storage::Bkp, source),
             _ => {}
         }
         true
     }
 
-    fn reset(&mut self, storage: Storage, core: &mut Core) {
-        let Some(panel) = self.panels.iter().find(|p| p.counters.storage() == storage) else {
+    fn reset(&mut self, storage: Storage, source: &mut dyn Source) {
+        if !self.panels.iter().any(|p| p.storage == storage) {
             self.status = Some(Status::Error(format!("No {storage} counters")));
             return;
-        };
-        self.status = Some(match reset(panel.counters, core) {
+        }
+        self.status = Some(match self.counters.reset(storage, source) {
             Ok(()) => Status::Info(format!("{storage} counters reset")),
             Err(e) => Status::Error(format!("Failed to reset {storage} counters: {e:#}")),
         });
-        self.refresh(core);
+        self.refresh(source);
     }
 
-    /// Read all counters from the target.
-    fn refresh(&mut self, core: &mut Core) {
+    /// Read all counters, noting which ones changed.
+    fn refresh(&mut self, source: &mut dyn Source) {
         let now = Instant::now();
-        for panel in &mut self.panels {
-            if let Err(e) = read_block(panel.counters, core, &mut self.changed, now) {
-                let storage = panel.counters.storage();
-                self.read_error = Some(format!("Failed to read {storage} counters: {e:#}"));
-                return;
+        match self.counters.read_changes(source) {
+            Ok(changes) => {
+                for c in changes {
+                    // Resets are not interesting, only counters firing
+                    if c.event != Event::Initial && c.value.to_u64() != 0 {
+                        self.changed.insert((c.storage, c.counter.idx), now);
+                    }
+                }
+                self.read_error = None;
             }
+            Err(e) => self.read_error = Some(format!("Failed to read counters: {e:#}")),
         }
-        self.read_error = None;
     }
 
-    /// Read new defmt logs, returns whether there is anything new to show.
-    fn poll_logs(&mut self, core: &mut Core) -> bool {
-        let Some(defmt) = &mut self.defmt else {
+    /// Read new logs, returns whether there is anything new to show.
+    fn poll_logs(&mut self, source: &mut dyn Source) -> bool {
+        if !self.has_logs {
             return false;
-        };
-        match defmt.poll(core) {
+        }
+        let attached = source.logs_attached() == Some(true);
+        let changed = attached != self.logs_attached;
+        self.logs_attached = attached;
+        let new = match source.poll_logs() {
             Ok(logs) => {
                 let had_error = self.log_error.take().is_some();
+                let new = !logs.is_empty();
                 self.logs.extend(logs);
                 let excess = self.logs.len().saturating_sub(LOG_HISTORY);
                 self.logs.drain(..excess);
-                had_error || !self.logs.is_empty()
+                had_error || new
             }
             Err(e) => {
-                self.log_error = Some(format!("Failed to read defmt logs: {e:#}"));
+                self.log_error = Some(format!("Failed to read logs: {e:#}"));
                 true
             }
-        }
+        };
+        changed || new
     }
 
     fn render(&mut self, frame: &mut Frame) {
@@ -205,7 +221,7 @@ impl<'a> App<'a> {
         let [title, main, status, keys] = frame.area().layout(&layout);
 
         frame.render_widget(self.title().centered(), title);
-        let counters = if self.defmt.is_some() {
+        let counters = if self.has_logs {
             // Counters take what they need, but leave at least a third to the logs
             let height = self.panels_height().min(main.height * 2 / 3);
             let [counters, logs] = main.layout(&Layout::vertical([
@@ -219,16 +235,16 @@ impl<'a> App<'a> {
         };
         self.render_panels(frame, counters);
         frame.render_widget(self.status_line(), status);
-        frame.render_widget(keys_line(self.panels.len() > 1, self.defmt.is_some()), keys);
+        frame.render_widget(keys_line(self.panels.len() > 1, self.has_logs), keys);
     }
 
     /// `Counters · 2 of 14 non-zero`
     fn title(&self) -> Line<'static> {
         let t = theme();
         let (total, fired) = self
-            .panels
-            .iter()
-            .flat_map(|p| p.counters.values())
+            .counters
+            .blocks()
+            .flat_map(|b| b.values())
             .fold((0, 0), |(total, fired), (_, v)| {
                 (total + 1, fired + (v.to_u64() != 0) as usize)
             });
@@ -237,9 +253,14 @@ impl<'a> App<'a> {
         } else {
             Style::from(t.warn)
         };
+        let source = if self.title.is_empty() {
+            String::new()
+        } else {
+            format!(" · {}", self.title)
+        };
         Line::from_iter([
             Span::styled("Counters", Style::from(t.header)),
-            Span::styled(" · ", Style::from(t.hint)),
+            Span::styled(format!("{source} · "), Style::from(t.hint)),
             Span::styled(fired.to_string(), fired_style),
             Span::styled(format!(" of {total} non-zero"), Style::from(t.hint)),
         ])
@@ -247,9 +268,9 @@ impl<'a> App<'a> {
 
     /// Rows needed to show all panels in full.
     fn panels_height(&self) -> u16 {
-        self.panels
-            .iter()
-            .map(|p| p.counters.entries().len() as u16 + PANEL_OVERHEAD)
+        self.counters
+            .blocks()
+            .map(|b| b.entries().len() as u16 + PANEL_OVERHEAD)
             .sum()
     }
 
@@ -257,11 +278,17 @@ impl<'a> App<'a> {
     fn render_logs(&self, frame: &mut Frame, area: Rect) {
         let t = theme();
         let hint = Style::from(t.hint);
-        let attached = self.defmt.as_ref().is_some_and(|d| d.is_attached());
         let title = Line::from_iter([
             Span::raw(" 📜 "),
             Span::styled("defmt logs", Style::from(t.header)),
-            Span::styled(if attached { " " } else { " waiting for RTT " }, hint),
+            Span::styled(
+                if self.logs_attached {
+                    " "
+                } else {
+                    " waiting for the firmware "
+                },
+                hint,
+            ),
         ]);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
@@ -289,9 +316,9 @@ impl<'a> App<'a> {
     fn render_panels(&mut self, frame: &mut Frame, area: Rect) {
         // Give each panel as many rows as it needs, sharing the space proportionally if there is not enough
         let heights: Vec<u16> = self
-            .panels
-            .iter()
-            .map(|p| p.counters.entries().len() as u16 + PANEL_OVERHEAD)
+            .counters
+            .blocks()
+            .map(|b| b.entries().len() as u16 + PANEL_OVERHEAD)
             .collect();
         let constraints: Vec<Constraint> = if heights.iter().sum::<u16>() <= area.height {
             heights.into_iter().map(Constraint::Length).collect()
@@ -302,21 +329,22 @@ impl<'a> App<'a> {
 
         // Align columns across panels
         let name_width = self
-            .panels
-            .iter()
-            .flat_map(|p| p.counters.entries().values())
+            .counters
+            .blocks()
+            .flat_map(|b| b.entries().values())
             .map(|c| c.qualified_name().len())
             .max()
             .unwrap_or(0) as u16;
         let now = Instant::now();
-        for (i, (panel, area)) in self.panels.iter_mut().zip(areas.iter()).enumerate() {
+        let panels = self.panels.iter_mut().zip(self.counters.blocks());
+        for (i, ((panel, block), area)) in panels.zip(areas.iter()).enumerate() {
             let view = PanelView {
                 focused: i == self.focus,
                 name_width,
                 changed: &self.changed,
                 now,
             };
-            view.render(frame, *area, panel);
+            view.render(frame, *area, block, &mut panel.state);
         }
     }
 
@@ -336,15 +364,20 @@ impl<'a> App<'a> {
 struct PanelView<'a> {
     focused: bool,
     name_width: u16,
-    changed: &'a HashMap<u64, Instant>,
+    changed: &'a HashMap<(Storage, u64), Instant>,
     now: Instant,
 }
 
 impl PanelView<'_> {
-    fn render(&self, frame: &mut Frame, area: Rect, panel: &mut Panel) {
+    fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        counters: &CountersBlock,
+        state: &mut TableState,
+    ) {
         let t = theme();
         let hint = Style::from(t.hint);
-        let counters = &*panel.counters;
 
         let buffer = counters.buffer();
         let used = counters.used_bytes();
@@ -387,7 +420,7 @@ impl PanelView<'_> {
         ) as usize;
         let rows = counters
             .values_opt()
-            .map(|(cnt, value)| self.row(cnt, value, location_width));
+            .map(|(cnt, value)| self.row(counters.storage(), cnt, value, location_width));
 
         let mut table = Table::new(rows, widths)
             .header(header)
@@ -402,10 +435,16 @@ impl PanelView<'_> {
             table = table.highlight_symbol(" ".repeat(HIGHLIGHT_SYMBOL_WIDTH as usize));
         }
 
-        frame.render_stateful_widget(table, area, &mut panel.state);
+        frame.render_stateful_widget(table, area, state);
     }
 
-    fn row<'c>(&self, cnt: &'c Counter, value: Option<Value>, location_width: usize) -> Row<'c> {
+    fn row<'c>(
+        &self,
+        storage: Storage,
+        cnt: &'c Counter,
+        value: Option<Value>,
+        location_width: usize,
+    ) -> Row<'c> {
         let t = theme();
         let hint = Style::from(t.hint);
         // Only draw attention to counters that have fired
@@ -417,7 +456,7 @@ impl PanelView<'_> {
         };
         let recently_changed = self
             .changed
-            .get(&cnt.addr)
+            .get(&(storage, cnt.idx))
             .is_some_and(|at| self.now.duration_since(*at) < CHANGE_HIGHLIGHT);
         let value_style = if recently_changed {
             style.add_modifier(Modifier::REVERSED)
@@ -476,32 +515,6 @@ fn truncate_left(s: &str, width: usize) -> String {
     format!("…{tail}")
 }
 
-/// Read a block of counters from the target, noting which ones changed.
-fn read_block(
-    counters: &mut CountersBlock,
-    core: &mut Core,
-    changed: &mut HashMap<u64, Instant>,
-    now: Instant,
-) -> anyhow::Result<()> {
-    let previous: HashMap<u64, u64> = counters
-        .values()
-        .map(|(c, v)| (c.addr, v.to_u64()))
-        .collect();
-
-    let mut data = vec![0u8; counters.buffer().size as usize];
-    core.read_mem_32bit(counters.buffer().addr, &mut data)?;
-    counters.read_values(&data)?;
-
-    for (c, v) in counters.values() {
-        let v = v.to_u64();
-        // Resets are not interesting, only counters firing
-        if v != 0 && previous.get(&c.addr).is_some_and(|p| *p != v) {
-            changed.insert(c.addr, now);
-        }
-    }
-    Ok(())
-}
-
 /// Single-width symbol for a severity, so that it can be coloured (unlike emoji).
 fn severity_icon(severity: Severity) -> char {
     match severity {
@@ -527,13 +540,13 @@ fn log_lines(log: &Log) -> Vec<Line<'static>> {
     let t = theme();
     let hint = Style::from(t.hint);
     let style = log
-        .severity()
+        .severity
         .map_or(Style::from(t.table), |s| Style::from(t.severity(s)));
     let mut prefix = vec![];
     if let Some(ts) = &log.timestamp {
         prefix.push(Span::styled(format!("{ts} "), hint));
     }
-    prefix.push(Span::styled(format!("{} ", log.level_label()), style));
+    prefix.push(Span::styled(format!("{} ", level_label(log)), style));
     let indent = " ".repeat(prefix.iter().map(|s| s.width()).sum());
 
     let mut lines: Vec<Line> = log

@@ -65,6 +65,29 @@ Library crates can count per instance, see [Instance counters](#instance-counter
     runner = "cnt run --chip STM32H533RE"
     ```
 
+  * `read`, `tui` and `reset` check that the target runs the ELF's firmware: the GNU build id is read from the
+    target's flash and compared with the ELF's, a mismatch is refused (`--force` to use the ELF anyway), as the
+    counters would be decoded with the wrong names. Without an ELF argument the ELF with the target's build id is
+    used: from `target/`, the directories in `WW_ELF_PATH`, or the ELF directory `~/.cache/ww/elf`, which
+    `cnt elf add <ELF or release archive .tar.zst>` fills. The firmware has to keep the note in flash:
+    ```toml
+    # .cargo/config.toml
+    rustflags = ["-C", "link-arg=--build-id=sha1"]
+    ```
+    ```
+    /* memory.x */
+    SECTIONS
+    {
+      .note.gnu.build-id : ALIGN(4)
+      {
+        __build_id_start = .;
+        KEEP(*(.note.gnu.build-id));
+        __build_id_end = .;
+      } > FLASH
+    } INSERT AFTER .rodata;
+    ```
+  * The same counters can be read over WireWeaver instead of a probe: `ww counters` (the `ww_counters` API).
+
 <img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
   
 ## How to get counters data from fw itself

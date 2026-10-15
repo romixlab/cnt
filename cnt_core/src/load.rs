@@ -20,9 +20,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 impl Counters {
+    /// Counters of the firmware ELF at `path`.
     pub fn load_elf(path: &Path) -> anyhow::Result<Self> {
-        let elf_bytes = std::fs::read(path)?;
-        let elf = File::parse(elf_bytes.as_slice())?;
+        let elf_bytes =
+            std::fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
+        Self::from_elf(&elf_bytes).with_context(|| format!("ELF {}", path.display()))
+    }
+
+    /// Counters of a firmware ELF's contents.
+    pub fn from_elf(elf_bytes: &[u8]) -> anyhow::Result<Self> {
+        let elf = File::parse(elf_bytes)?;
         let mut loader = Loader::new(&elf)?;
         loader.collect()?;
         let Loader {
@@ -38,6 +45,8 @@ impl Counters {
         Ok(Self {
             ram_counters,
             bkp_counters,
+            build_id: crate::elf::build_id_of(&elf),
+            build_id_note: crate::elf::note_location(&elf),
         })
     }
 

@@ -1,10 +1,10 @@
 //! Probe and target selection, following the conventions of the probe-rs CLI.
 
 use super::cargo_config;
-use crate::theme::theme;
 use anstream::eprintln;
 use anyhow::{Context, bail};
 use clap::Args;
+use cnt_view::theme;
 use probe_rs::config::{Registry, RegistryError, TargetSelector};
 use probe_rs::probe::list::Lister;
 use probe_rs::probe::{DebugProbeInfo, DebugProbeSelector, Probe, WireProtocol};

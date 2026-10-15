@@ -15,6 +15,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   version in `_CNT_SIGNATURE`. Firmware serving its counters over another path than a probe (`ww_counters`) reports
   them. With the `disabled` feature these are 0 and `counters_ram_buffer()` / `counters_bkp_buffer()` are empty, so
   such code compiles either way.
+- `cnt_core`: `Source`, where buffer words come from (a probe, a WireWeaver device, a test), with
+  `Counters::read`, `Counters::read_changes` (every counter as `Event::Initial` first, then `Change` / `Reset` /
+  `Decrease`, moved here from the CLI) and `Counters::reset`. Reads cover only the words in use
+  (`CountersBlock::used_words`), and a `u64` counter whose high word changed or whose value went down is read again
+  until its high word reads the same twice, so a carry between the two words no longer shows a torn value.
+- `cnt_core`: `elf` module, the firmware ELF by GNU build id: `Counters::build_id()` and `build_id_note()` (where
+  the note is in flash), `parse_build_id_note`, `resolve` (an ELF given explicitly is checked, else `<build id>.elf`
+  in `WW_ELF_PATH` and the ELF directory `~/.cache/ww/elf`, else the binaries under `target/`), `add` (an ELF or a
+  release ELF archive, `.tar.zst` or `.tar`, into the ELF directory by build id), `target_binaries`.
+- `cnt_core`: `Counters::from_elf(bytes)`, `Log` (a firmware log message for the views), `CountersBlock::value`,
+  `capacity_words`.
+- `cnt_view`: new crate with the terminal views of the CLI (list, read, `read --watch`, the TUI, JSON output, theme)
+  over any `Source`, so `ww counters` shows the same over WireWeaver.
+- `cnt_cli`: `read`, `tui` and `reset` read the build id note from the target's flash and refuse an ELF of other
+  firmware (`--force` to use it anyway). Without an ELF argument, the ELF with the target's build id is used if
+  `target/`, `WW_ELF_PATH` or `~/.cache/ww/elf` has it.
+- `cnt_cli`: `cnt elf add <ELF or archive>...` puts ELFs into the ELF directory by build id, `cnt elf id <ELF>`
+  prints one's build id.
+- `cnt_cli`: `--version` shows the git SHA and build time.
 - `fixtures/counters_fw`: a test firmware (Cortex-M, build id in flash) whose ELF the host tests decode,
   `just fixtures` rebuilds `cnt_core/tests/fixtures/counters_fw.elf`.
 
@@ -22,6 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `justfile` gets a `default` recipe (`@just --list`), so a bare `just` only lists the recipes instead of
   running `install-local`.
+
+### Changed
+
+- `cnt_core`: ⚠️ `CountersBlock::read_values(&[u8])` is replaced by `set_words(&[u32])`, which takes the words from
+  the start of the buffer up to `used_words()` (not the whole buffer).
 
 ## [0.4.1] - 2026-10-03
 

@@ -18,15 +18,12 @@ anstyle = "1.0"
 anyhow.workspace = true
 clap = { version = "4.6", features = ["derive", "env"] }
 cnt_core.workspace = true
+cnt_view.workspace = true
 crossterm = "0.29.0"
-ctrlc = "3"
 defmt-decoder = "1.1"
 defmt-parser = "1.0"
 human-repr = "1.1.0"
 probe-rs = "0.32.0"
-ratatui = "0.30.2"
-# Conversion from `anstyle` styles, so that the TUI shares the CLI theme
-ratatui-core = { version = "0.1.2", features = ["anstyle"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 toml = "1.1.6"
 

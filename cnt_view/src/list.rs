@@ -44,7 +44,7 @@ fn list_entries(cnt: &CountersBlock) {
 }
 
 /// `📍 RAM counters` followed by the buffer address and size.
-pub(super) fn print_header(cnt: &CountersBlock) {
+pub fn print_header(cnt: &CountersBlock) {
     let t = theme();
     let (header, hint) = (t.header, t.hint);
     println!(
@@ -56,7 +56,7 @@ pub(super) fn print_header(cnt: &CountersBlock) {
 }
 
 /// Width of the longest counter name in a block, for aligning columns.
-pub(super) fn name_width(cnt: &CountersBlock) -> usize {
+pub fn name_width(cnt: &CountersBlock) -> usize {
     cnt.entries()
         .values()
         .map(|c| c.qualified_name().len())
@@ -65,7 +65,7 @@ pub(super) fn name_width(cnt: &CountersBlock) -> usize {
 }
 
 /// Fixed-width severity label, as printed by defmt.
-pub(crate) fn severity_label(severity: Severity) -> &'static str {
+pub fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "ERROR",
         Severity::Warn => "WARN ",
@@ -76,7 +76,7 @@ pub(crate) fn severity_label(severity: Severity) -> &'static str {
 }
 
 /// defmt-style location line: `└─ crate [Layout] @ file:line`.
-pub(super) fn print_location(c: &Counter) {
+pub fn print_location(c: &Counter) {
     let t = theme();
     let (hint, path) = (t.hint, t.path);
     print!("{hint}└─ {}", c.crate_name);

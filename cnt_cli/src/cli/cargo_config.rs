@@ -5,8 +5,8 @@
 //! runner = "probe-rs run --chip STM32H533RE"
 //! ```
 
-use crate::theme::theme;
 use anstream::eprintln;
+use cnt_view::theme;
 use std::path::{Path, PathBuf};
 
 /// A chip name found in a cargo config file.

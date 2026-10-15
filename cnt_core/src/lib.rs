@@ -1,9 +1,14 @@
 //! Host side of the `cnt` crate: loads counter descriptions from a firmware ELF and decodes buffer contents.
 //!
 //! Counters are described by marker symbols the `cnt` macros emit into non-allocated sections placed at address 0 by
-//! `cnt.x`, see [`load`] for the format.
+//! `cnt.x`, see [`load`] for the format. The buffer words come from a [`Source`]: a debug probe, a WireWeaver device
+//! (`ww_counters`) or a test. [`elf`] finds the ELF of the firmware a device runs by its build id.
 
+pub mod elf;
 mod load;
+mod source;
+
+pub use source::{Change, Event, Source};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -15,6 +20,10 @@ use std::sync::Arc;
 pub struct Counters {
     ram_counters: Option<CountersBlock>,
     bkp_counters: Option<CountersBlock>,
+    /// GNU build id of the ELF, `None` if it was linked without one
+    build_id: Option<Vec<u8>>,
+    /// Where the build id note is in target memory, if the firmware keeps it in flash
+    build_id_note: Option<Buffer>,
 }
 
 /// All counters in one buffer (RAM or BKP), keyed by the index of their first word.
@@ -25,6 +34,7 @@ pub struct CountersBlock {
     values: BTreeMap<u64, Value>,
 }
 
+#[derive(Debug)]
 pub struct Counter {
     /// Cargo package the counter was declared in. For instance counters: the package that created the instance.
     pub package: Arc<String>,
@@ -98,6 +108,42 @@ pub struct Buffer {
     pub size: u64,
 }
 
+/// A log message of the firmware, shown together with the counters (defmt logs over RTT, decoded by the CLI).
+#[derive(Clone, Debug)]
+pub struct Log {
+    /// `None` for `defmt::println!`
+    pub severity: Option<Severity>,
+    /// Target timestamp, if the firmware defines one
+    pub timestamp: Option<String>,
+    pub message: String,
+    pub location: Option<LogLocation>,
+}
+
+/// Where a log statement is in the firmware's source.
+#[derive(Clone, Debug)]
+pub struct LogLocation {
+    pub module: String,
+    pub file: std::path::PathBuf,
+    pub line: u64,
+}
+
+impl Log {
+    /// `file:line`, with the file relative to the current directory if it is below it.
+    pub fn file_line(&self) -> Option<String> {
+        let loc = self.location.as_ref()?;
+        let file = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| {
+                loc.file
+                    .strip_prefix(cwd)
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            })
+            .unwrap_or_else(|| loc.file.clone());
+        Some(format!("{}:{}", file.display(), loc.line))
+    }
+}
+
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.file, self.line)
@@ -123,6 +169,17 @@ impl Counters {
     pub fn is_empty(&self) -> bool {
         self.ram_counters.is_none() && self.bkp_counters.is_none()
     }
+
+    /// GNU build id of the ELF the counters were loaded from, `None` if it was linked without one.
+    pub fn build_id(&self) -> Option<&[u8]> {
+        self.build_id.as_deref()
+    }
+
+    /// Where the firmware keeps its build id note (`.note.gnu.build-id`) in target memory, `None` if it is not in
+    /// flash. A probe reads it there to check that the device runs this ELF, see [`elf::parse_build_id_note`].
+    pub fn build_id_note(&self) -> Option<Buffer> {
+        self.build_id_note
+    }
 }
 
 impl CountersBlock {
@@ -144,28 +201,45 @@ impl CountersBlock {
         self.entries.values().map(|c| c.ty.bytes()).sum()
     }
 
-    /// Decode counter values from the contents of the buffer read from the target.
-    pub fn read_values(&mut self, buf: &[u8]) -> anyhow::Result<()> {
-        if buf.len() as u64 != self.buffer.size {
+    /// Words from the start of the buffer up to the end of the last counter: what a read has to cover. The same as
+    /// the `used_words` the firmware reports (`cnt::ram_used_words()`) when it runs this ELF.
+    pub fn used_words(&self) -> u64 {
+        self.entries
+            .iter()
+            .next_back()
+            .map_or(0, |(idx, c)| idx + c.ty.words())
+    }
+
+    /// Size of the buffer in 32-bit words.
+    pub fn capacity_words(&self) -> u64 {
+        self.buffer.size / 4
+    }
+
+    /// Decode counter values from the words of the buffer, read from its start. `words` must cover at least
+    /// [`used_words`](Self::used_words).
+    pub fn set_words(&mut self, words: &[u32]) -> anyhow::Result<()> {
+        if (words.len() as u64) < self.used_words() {
             return Err(anyhow!(
-                "Invalid buffer size: {} B, expected {} B",
-                buf.len(),
-                self.buffer.size
+                "{} {} counters words read, {} needed",
+                words.len(),
+                self.storage,
+                self.used_words()
             ));
         }
         for (idx, counter) in self.entries.iter() {
-            // Counters are validated to lie within the buffer when the ELF is loaded, so this only fails on a bug
-            let offset = (idx * 4) as usize;
-            let bytes = buf
-                .get(offset..offset + counter.ty.bytes() as usize)
-                .ok_or_else(|| anyhow!("Counter {} is outside of the buffer", counter.name))?;
+            let idx = *idx as usize;
             let value = match counter.ty {
-                Ty::U32 => Value::U32(u32::from_le_bytes(bytes.try_into()?)),
-                Ty::U64 => Value::U64(u64::from_le_bytes(bytes.try_into()?)),
+                Ty::U32 => Value::U32(words[idx]),
+                Ty::U64 => Value::U64(u64::from(words[idx + 1]) << 32 | u64::from(words[idx])),
             };
-            self.values.insert(*idx, value);
+            self.values.insert(idx as u64, value);
         }
         Ok(())
+    }
+
+    /// Value of the counter whose first word is `idx`, if read.
+    pub fn value(&self, idx: u64) -> Option<Value> {
+        self.values.get(&idx).copied()
     }
 
     /// Counters that have been read at least once, with their values.

@@ -4,17 +4,17 @@
 //! the glue is here, so that logs can be read through the same probe session as the counters: a probe can only be
 //! opened by one process at a time.
 
-use crate::cli::list::severity_label;
-use crate::theme::theme;
 use anstream::eprintln;
 use anyhow::Context;
 use clap::Args;
 use cnt_core::Severity;
+use cnt_core::{Log, LogLocation};
+use cnt_view::theme;
 use defmt_decoder::{DecodeError, Location, Locations, StreamDecoder, Table};
 use defmt_parser::Level;
 use probe_rs::Core;
 use probe_rs::rtt::{self, ChannelMode, Rtt, ScanRegion};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// How often to look for the RTT control block while the firmware has not set it up yet.
@@ -54,41 +54,22 @@ impl LogOptions {
     }
 }
 
-/// A decoded log message.
-pub struct Log {
-    /// `None` for `defmt::println!`
-    pub level: Option<Level>,
-    /// Target timestamp, if the firmware defines one with `defmt::timestamp!`
-    pub timestamp: Option<String>,
-    pub message: String,
-    pub location: Option<&'static Location>,
+/// The counter severity with the same name as a defmt level.
+fn severity(level: Level) -> Severity {
+    match level {
+        Level::Trace => Severity::Trace,
+        Level::Debug => Severity::Debug,
+        Level::Info => Severity::Info,
+        Level::Warn => Severity::Warn,
+        Level::Error => Severity::Error,
+    }
 }
 
-impl Log {
-    /// The counter severity with the same name, for styling.
-    pub fn severity(&self) -> Option<Severity> {
-        Some(match self.level? {
-            Level::Trace => Severity::Trace,
-            Level::Debug => Severity::Debug,
-            Level::Info => Severity::Info,
-            Level::Warn => Severity::Warn,
-            Level::Error => Severity::Error,
-        })
-    }
-
-    /// Fixed-width level label, blank for `println!`.
-    pub fn level_label(&self) -> &'static str {
-        self.severity().map_or("     ", severity_label)
-    }
-
-    /// `file:line`, with the file relative to the current directory if it is below it.
-    pub fn file_line(&self) -> Option<String> {
-        let loc = self.location?;
-        let file = std::env::current_dir()
-            .ok()
-            .and_then(|cwd| loc.file.strip_prefix(cwd).ok().map(PathBuf::from))
-            .unwrap_or_else(|| loc.file.clone());
-        Some(format!("{}:{}", file.display(), loc.line))
+fn location(loc: &Location) -> LogLocation {
+    LogLocation {
+        module: loc.module.clone(),
+        file: loc.file.clone(),
+        line: loc.line,
     }
 }
 
@@ -204,13 +185,14 @@ impl DefmtReader {
         loop {
             match self.decoder.decode() {
                 Ok(frame) => logs.push(Log {
-                    level: frame.level(),
+                    severity: frame.level().map(severity),
                     timestamp: frame.display_timestamp().map(|t| t.to_string()),
                     message: frame.display_message().to_string(),
                     location: elf
                         .locations
                         .as_ref()
-                        .and_then(|locs| locs.get(&frame.index())),
+                        .and_then(|locs| locs.get(&frame.index()))
+                        .map(location),
                 }),
                 Err(DecodeError::UnexpectedEof) => break,
                 // rzCOBS (the default) resynchronises on the next frame
@@ -219,7 +201,7 @@ impl DefmtReader {
                     // Raw encoding cannot find the next frame, start over with the next data read
                     self.decoder = elf.table.new_stream_decoder();
                     logs.push(Log {
-                        level: Some(Level::Error),
+                        severity: Some(Severity::Error),
                         timestamp: None,
                         message: "cnt: malformed defmt data, some logs were lost".into(),
                         location: None,

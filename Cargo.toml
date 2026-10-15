@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["cnt", "cnt_cli", "cnt_core", "cnt_macro"]
+members = ["cnt", "cnt_cli", "cnt_core", "cnt_macro", "cnt_view"]
 
 [workspace.package]
 version = "0.4.1"
@@ -14,5 +14,6 @@ repository = "https://github.com/romixlab/cnt"
 [workspace.dependencies]
 anyhow = "1.0"
 cnt_core = { path = "./cnt_core", version = "0.4.1" }
+cnt_view = { path = "./cnt_view", version = "0.4.1" }
 # Exact: the code cnt_macro generates refers to items of the matching cnt version
 cnt_macro = { path = "./cnt_macro", version = "=0.4.1" }

@@ -1,27 +1,24 @@
 mod cargo_config;
-mod elf;
-mod keys;
-pub(crate) mod list;
-pub(crate) mod logs;
-mod output;
+mod elf_cmd;
+mod logs;
 mod probe;
-mod read;
-pub mod reset;
 mod run;
+mod target;
 
-use crate::theme::theme;
 use anstream::{eprintln, println};
 use anyhow::bail;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use cnt_core::{Counters, Storage};
+use cnt_view::{Format, output, theme};
+use elf_cmd::ElfCommand;
 use logs::LogOptions;
-pub(crate) use output::Format;
 use probe::ProbeOptions;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
+use target::ProbeSource;
 
 #[derive(Parser)]
-#[command(version)]
+#[command(version = env!("CNT_VERSION"))]
 #[command(propagate_version = true)]
 #[command(color = clap::ColorChoice::Auto)]
 #[command(
@@ -53,23 +50,34 @@ impl Cli {
 #[derive(Args)]
 pub(crate) struct Elf {
     /// Path to the firmware ELF file. If omitted, the most recently built binary of the cargo project in the current
-    /// directory is used
+    /// directory is used, or the ELF with the build id the target runs (target/, WW_ELF_PATH, ~/.cache/ww/elf)
     elf_path: Option<PathBuf>,
 }
 
 impl Elf {
-    /// The ELF path given on the command line, or the one found in the current cargo project.
+    /// The ELF path given on the command line, or the newest one built in the current cargo project.
     pub fn resolve(&self) -> anyhow::Result<PathBuf> {
         match &self.elf_path {
             Some(path) => Ok(path.clone()),
             None => {
-                let path = elf::find_elf()?;
+                let path = cnt_core::elf::newest_target_binary()?;
                 let (hint, style) = (theme().hint, theme().path);
                 eprintln!("{hint}Using ELF{hint:#} {style}{}{style:#}", path.display());
                 Ok(path)
             }
         }
     }
+
+    fn given(&self) -> bool {
+        self.elf_path.is_some()
+    }
+}
+
+#[derive(Args)]
+pub(crate) struct Check {
+    /// Use the ELF although the target runs other firmware (its build id differs)
+    #[arg(long)]
+    force: bool,
 }
 
 #[derive(Subcommand)]
@@ -88,6 +96,8 @@ pub(crate) enum Command {
         interval: u64,
         #[command(flatten)]
         elf: Elf,
+        #[command(flatten)]
+        check: Check,
         #[command(flatten)]
         probe: ProbeOptions,
         #[command(flatten)]
@@ -117,6 +127,8 @@ pub(crate) enum Command {
         #[command(flatten)]
         elf: Elf,
         #[command(flatten)]
+        check: Check,
+        #[command(flatten)]
         probe: ProbeOptions,
     },
     /// Run terminal UI
@@ -124,41 +136,52 @@ pub(crate) enum Command {
         #[command(flatten)]
         elf: Elf,
         #[command(flatten)]
+        check: Check,
+        #[command(flatten)]
         probe: ProbeOptions,
         #[command(flatten)]
         log: LogOptions,
     },
+    /// The ELF directory, where the ELF of the firmware a target runs is found by its build id
+    #[command(subcommand)]
+    Elf(ElfCommand),
 }
 
 impl Command {
-    pub fn elf(&self) -> &Elf {
+    fn elf(&self) -> Option<&Elf> {
         match self {
             Command::List(elf)
             | Command::Read { elf, .. }
             | Command::Run { elf, .. }
             | Command::Tui { elf, .. }
-            | Command::Reset { elf, .. } => elf,
+            | Command::Reset { elf, .. } => Some(elf),
+            Command::Elf(_) => None,
         }
     }
 }
 
-pub fn process_cmd(
-    cmd: Command,
-    format: Format,
-    mut counters: Counters,
-    elf_path: &Path,
-) -> anyhow::Result<()> {
+pub fn process_cmd(cmd: Command, format: Format) -> anyhow::Result<()> {
+    let Some(elf) = cmd.elf() else {
+        let Command::Elf(cmd) = cmd else {
+            unreachable!()
+        };
+        return elf_cmd::run(cmd);
+    };
+    let given = elf.given();
+    let mut elf_path = elf.resolve()?;
+    let mut counters = Counters::load_elf(&elf_path)?;
     match cmd {
         Command::List(_) => {
             if format == Format::Text {
-                list::list(&counters);
+                cnt_view::list::list(&counters);
             } else {
-                output::counters(format, &counters, elf_path)?;
+                output::counters(format, &counters, &elf_path)?;
             }
         }
         Command::Read {
             watch: true,
             interval,
+            check,
             probe,
             log,
             ..
@@ -166,13 +189,14 @@ pub fn process_cmd(
             if format == Format::Json {
                 bail!("--watch prints a stream of changes, use --format jsonl or text");
             }
-            let mut defmt = log.reader(elf_path);
-            let mut session = probe.attach(elf_path)?;
+            let mut session = probe.attach(&elf_path)?;
             let mut core = session.core(0)?;
-            read::watch(
+            checked(&mut core, &mut counters, &mut elf_path, given, check.force)?;
+            let defmt = log.reader(&elf_path);
+            let mut source = ProbeSource::new(core, &counters, defmt);
+            cnt_view::watch(
                 &mut counters,
-                &mut core,
-                defmt.as_mut(),
+                &mut source,
                 format,
                 Duration::from_millis(interval),
             )?;
@@ -190,66 +214,93 @@ pub fn process_cmd(
             if format == Format::Json {
                 bail!("run prints a stream of changes, use --format jsonl or text");
             }
-            let mut defmt = log.reader(elf_path);
-            let mut session = probe.attach(elf_path)?;
-            run::flash_and_reset(&mut session, elf_path, defmt.as_ref())?;
-            let mut core = session.core(0)?;
+            let defmt = log.reader(&elf_path);
+            let mut session = probe.attach(&elf_path)?;
+            // Runs the firmware just flashed, nothing to check
+            run::flash_and_reset(&mut session, &elf_path, defmt.as_ref())?;
+            let core = session.core(0)?;
+            let mut source = ProbeSource::new(core, &counters, defmt);
             if tui {
-                crate::tui::tui(&mut counters, &mut core, defmt)?;
+                cnt_view::tui(&mut counters, &mut source, "")?;
             } else {
-                read::watch(
+                cnt_view::watch(
                     &mut counters,
-                    &mut core,
-                    defmt.as_mut(),
+                    &mut source,
                     format,
                     Duration::from_millis(interval),
                 )?;
             }
         }
-        Command::Read { probe, .. } => {
-            let mut session = probe.attach(elf_path)?;
+        Command::Read { check, probe, .. } => {
+            let mut session = probe.attach(&elf_path)?;
             let mut core = session.core(0)?;
-            read::read(&mut counters, &mut core)?;
+            checked(&mut core, &mut counters, &mut elf_path, given, check.force)?;
+            let mut source = ProbeSource::new(core, &counters, None);
+            counters.read(&mut source)?;
             if format == Format::Text {
-                read::print(&counters);
+                cnt_view::print(&counters);
             } else {
-                output::counters(format, &counters, elf_path)?;
+                output::counters(format, &counters, &elf_path)?;
             }
         }
-        Command::Reset { bkp, probe, .. } => {
-            let mut session = probe.attach(elf_path)?;
+        Command::Reset {
+            bkp, check, probe, ..
+        } => {
+            let mut session = probe.attach(&elf_path)?;
             let mut core = session.core(0)?;
+            checked(&mut core, &mut counters, &mut elf_path, given, check.force)?;
+            let mut source = ProbeSource::new(core, &counters, None);
             let hint = theme().hint;
             let mut done = vec![];
-            if let Some(block) = counters.ram_counters() {
-                if format == Format::Text {
-                    println!("{hint}Resetting RAM counters{hint:#}");
+            for storage in [Storage::Ram, Storage::Bkp] {
+                let in_use = match storage {
+                    Storage::Ram => counters.ram_counters().is_some(),
+                    Storage::Bkp => bkp && counters.bkp_counters().is_some(),
+                };
+                if !in_use {
+                    continue;
                 }
-                reset::reset(block, &mut core)?;
-                done.push(Storage::Ram);
-            }
-            if bkp && let Some(block) = counters.bkp_counters() {
                 if format == Format::Text {
-                    println!("{hint}Resetting BKP counters{hint:#}");
+                    println!("{hint}Resetting {storage} counters{hint:#}");
                 }
-                reset::reset(block, &mut core)?;
-                done.push(Storage::Bkp);
+                counters.reset(storage, &mut source)?;
+                done.push(storage);
             }
             if format != Format::Text {
                 output::reset(format, &done)?;
             }
         }
-        Command::Tui { probe, log, .. } => {
+        Command::Tui {
+            check, probe, log, ..
+        } => {
             if format != Format::Text {
                 bail!(
                     "The TUI only supports text output, use `cnt read --format json|jsonl` instead"
                 );
             }
-            let defmt = log.reader(elf_path);
-            let mut session = probe.attach(elf_path)?;
+            let mut session = probe.attach(&elf_path)?;
             let mut core = session.core(0)?;
-            crate::tui::tui(&mut counters, &mut core, defmt)?;
+            checked(&mut core, &mut counters, &mut elf_path, given, check.force)?;
+            let defmt = log.reader(&elf_path);
+            let mut source = ProbeSource::new(core, &counters, defmt);
+            cnt_view::tui(&mut counters, &mut source, "")?;
         }
+        Command::Elf(_) => unreachable!(),
+    }
+    Ok(())
+}
+
+/// [`target::check_firmware`], switching to the ELF with the target's build id if it found one.
+fn checked(
+    core: &mut probe_rs::Core,
+    counters: &mut Counters,
+    elf_path: &mut PathBuf,
+    given: bool,
+    force: bool,
+) -> anyhow::Result<()> {
+    if let Some(found) = target::check_firmware(core, counters, elf_path, given, force)? {
+        *counters = Counters::load_elf(&found)?;
+        *elf_path = found;
     }
     Ok(())
 }

@@ -1,0 +1,27 @@
+[package]
+name = "cnt_view"
+description = "Terminal views of cnt counters (list, read, watch, TUI, JSON) over any word source: probe, WireWeaver, tests"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anstream = "1.0"
+anstyle = "1.0"
+anyhow.workspace = true
+clap = { version = "4.6", features = ["derive"] }
+cnt_core.workspace = true
+crossterm = "0.29.0"
+ctrlc = "3"
+human-repr = "1.1.0"
+ratatui = "0.30.2"
+# Conversion from `anstyle` styles, so that the TUI shares the CLI theme
+ratatui-core = { version = "0.1.2", features = ["anstyle"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+
+[target.'cfg(unix)'.dependencies]
+# Reading single key presses in watch mode, while keeping output processing and Ctrl+C
+rustix = { version = "1", default-features = false, features = ["std", "termios"] }

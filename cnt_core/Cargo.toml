@@ -10,6 +10,10 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+dirs = "6.0"
 object = "0.40.0"
+# Release ELF archives (.tar.zst), pure Rust
+ruzstd = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tar = { version = "0.4", default-features = false }

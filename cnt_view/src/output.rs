@@ -9,15 +9,14 @@
 //! `level`, `timestamp` and the location are `null` if not available.
 //! Diagnostics go to stderr, stdout only has JSON.
 
-use super::logs::Log;
 use clap::ValueEnum;
-use cnt_core::{Counter, Counters, CountersBlock, Storage, Value};
+use cnt_core::{Counter, Counters, CountersBlock, Event, Log, Storage, Value};
 use serde_json::{Value as Json, json};
 use std::io::{self, Write};
 use std::path::Path;
 
 #[derive(Copy, Clone, Default, Eq, PartialEq, ValueEnum)]
-pub(crate) enum Format {
+pub enum Format {
     /// Human readable, coloured if the terminal supports it
     #[default]
     Text,
@@ -35,6 +34,7 @@ pub fn counters(format: Format, counters: &Counters, elf_path: &Path) -> anyhow:
             let blocks: Vec<Json> = counters.blocks().map(block).collect();
             write_pretty(&json!({
                 "elf": elf_path.display().to_string(),
+                "build_id": counters.build_id().map(cnt_core::elf::hex),
                 "blocks": blocks,
             }))
         }
@@ -45,31 +45,6 @@ pub fn counters(format: Format, counters: &Counters, elf_path: &Path) -> anyhow:
                 line
             })
         })),
-    }
-}
-
-/// What a `read --watch` line reports, the value is always the current one.
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum Event {
-    /// First read, every counter is printed once
-    Initial,
-    /// Value increased since the previous read
-    Change,
-    /// All counters of a buffer that were non-zero decreased: the target or the counters were reset
-    Reset,
-    /// Value decreased while other counters of the same buffer did not. Counters saturate rather than wrap, so this
-    /// is the firmware writing the buffer, a torn read of a `u64` counter whose low word just overflowed, or corruption
-    Decrease,
-}
-
-impl Event {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Event::Initial => "initial",
-            Event::Change => "change",
-            Event::Reset => "reset",
-            Event::Decrease => "decrease",
-        }
     }
 }
 
@@ -91,12 +66,12 @@ pub fn log_event(ts: u64, log: &Log) -> anyhow::Result<()> {
     let line = json!({
         "event": "log",
         "ts": ts,
-        "level": log.severity(),
+        "level": log.severity,
         "timestamp": log.timestamp,
         "message": log.message,
-        "module": log.location.map(|l| &l.module),
-        "file": log.location.map(|l| l.file.display().to_string()),
-        "line": log.location.map(|l| l.line),
+        "module": log.location.as_ref().map(|l| &l.module),
+        "file": log.location.as_ref().map(|l| l.file.display().to_string()),
+        "line": log.location.as_ref().map(|l| l.line),
     });
     write_lines(std::iter::once(line))
 }
