@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-16
+
 ### Added
 
 - `cnt_core::elf`: a config file (`~/.config/ww/config.toml` on Linux, `config_path`), `[elf] dirs` entry
