@@ -1,35 +1,79 @@
-//! `--version` shows the git SHA and build time next to the version.
+//! Sets `GIT_SHA` (short, `-dirty` from the index) and `BUILD_TIME` (the commit's own time, not the clock) for
+//! `cnt --version`, so any installed build can be traced back to its commit. Both fall back to `unknown`
+//! without git.
+//!
+//! Worktree-safe: in a worktree `.git` is a file, not a dir, so watching the fixed `.git/HEAD` and `.git/index`
+//! paths never finds them, and cargo would treat build.rs as always-stale. Resolved with `git rev-parse`
+//! (`--git-dir` for this worktree's own `HEAD` and index, `--git-common-dir` for the branch ref and
+//! `packed-refs`, shared by every worktree); `BUILD_TIME` is the commit's time, so a rebuild of an unchanged
+//! commit reruns build.rs (harmless) without changing its output. Paths that don't exist (`packed-refs` before
+//! the first pack, a packed branch's ref file) aren't watched, same reason.
+
 use std::process::Command;
 
 fn main() {
-    let git = |args: &[&str]| {
-        Command::new("git")
-            .args(args)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-    };
-    let sha = match git(&["rev-parse", "--short", "HEAD"]) {
-        Some(sha) => {
-            let dirty = git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty());
-            if dirty { format!("{sha}-dirty") } else { sha }
-        }
-        None => "unknown".to_string(),
-    };
-    let built = Command::new("date")
-        .args(["+%-d %b %Y %H:%M"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    println!(
-        "cargo:rustc-env=CNT_VERSION={} ({sha}, built {built})",
-        env!("CARGO_PKG_VERSION")
-    );
-    if let Some(git_dir) = git(&["rev-parse", "--git-dir"]) {
-        println!("cargo:rerun-if-changed={git_dir}/HEAD");
-        println!("cargo:rerun-if-changed={git_dir}/index");
+    let git_dir = git(&["rev-parse", "--git-dir"]).unwrap_or_else(|| ".git".into());
+    let common_dir = git(&["rev-parse", "--git-common-dir"]).unwrap_or_else(|| git_dir.clone());
+    println!("cargo:rerun-if-changed={git_dir}/HEAD");
+    println!("cargo:rerun-if-changed={git_dir}/index");
+    if let Ok(head) = std::fs::read_to_string(format!("{git_dir}/HEAD"))
+        && let Some(r) = head.trim().strip_prefix("ref: ")
+    {
+        watch_if_there(&format!("{common_dir}/{r}"));
     }
+    watch_if_there(&format!("{common_dir}/packed-refs"));
+    println!("cargo:rustc-env=GIT_SHA={}", git_sha());
+    println!("cargo:rustc-env=BUILD_TIME={}", commit_time());
+}
+
+/// `rerun-if-changed` on a path that doesn't exist makes cargo treat build.rs as stale on every build.
+fn watch_if_there(path: &str) {
+    if std::path::Path::new(path).exists() {
+        println!("cargo:rerun-if-changed={path}");
+    }
+}
+
+fn git(args: &[&str]) -> Option<String> {
+    let out = Command::new("git").args(args).output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn git_sha() -> String {
+    let Some(sha) = git(&["rev-parse", "--short", "HEAD"]) else {
+        return "unknown".into();
+    };
+    match git(&["diff-index", "--quiet", "HEAD", "--"]) {
+        None => format!("{sha}-dirty"),
+        Some(_) => sha,
+    }
+}
+
+/// "3 Oct 2026 18:20 UTC", without a date crate; from the commit's own time (`git log -1 --format=%ct`), not the
+/// clock, so this output doesn't change between builds of the same commit.
+fn commit_time() -> String {
+    let Some(secs) = git(&["log", "-1", "--format=%ct"]).and_then(|s| s.parse::<i64>().ok()) else {
+        return "unknown".into();
+    };
+    let (days, rest) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm)
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    format!(
+        "{day} {} {year} {:02}:{:02} UTC",
+        MONTHS[(month - 1) as usize],
+        rest / 3600,
+        rest % 3600 / 60
+    )
 }

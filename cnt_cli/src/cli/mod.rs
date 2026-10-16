@@ -17,8 +17,17 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use target::ProbeSource;
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("GIT_SHA"),
+    ", commit ",
+    env!("BUILD_TIME"),
+    ")"
+);
+
 #[derive(Parser)]
-#[command(version = env!("CNT_VERSION"))]
+#[command(version = VERSION)]
 #[command(propagate_version = true)]
 #[command(color = clap::ColorChoice::Auto)]
 #[command(
