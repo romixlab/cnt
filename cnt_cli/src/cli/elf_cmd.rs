@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub(crate) enum ElfCommand {
-    /// Add ELFs to the ELF directory (~/.cache/ww/elf), stored by build id: single ELFs, or a firmware release's ELF
+    /// Add ELFs to the configured shared directory if there is one (~/.config/ww/config.toml's [elf] dirs),
+    /// otherwise the ELF directory (~/.cache/ww/elf), stored by build id: single ELFs, or a firmware release's ELF
     /// archive (.tar.zst or .tar)
     Add {
         /// ELF files or release archives
@@ -33,9 +34,8 @@ pub(crate) fn run(cmd: ElfCommand) -> anyhow::Result<()> {
         ElfCommand::Add { paths, dir } => {
             let dir = match dir {
                 Some(dir) => dir,
-                None => {
-                    elf::cache_dir().context("No cache directory on this system, pass --dir")?
-                }
+                None => elf::default_write_dir()
+                    .context("No cache directory on this system, pass --dir")?,
             };
             for path in paths {
                 let (added, skipped) = elf::add(&path, &dir)?;

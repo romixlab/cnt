@@ -6,8 +6,10 @@
 //! over a probe, or `ww_counters`' `INFO.build_id`), and the ELF is looked up by it with [`resolve`]:
 //!
 //! 1. an ELF given explicitly is used, and refused if its build id differs (unless forced);
-//! 2. `<build id>.elf` in the directories of `WW_ELF_PATH`, then in the ELF directory ([`cache_dir`],
-//!    `~/.cache/ww/elf` on Linux), filled by [`add`] from single ELFs or release archives;
+//! 2. `<build id>.elf` in the directories of `WW_ELF_PATH`, then in [`config_dirs`] (the `[elf] dirs` entry of
+//!    [`config_path`], e.g. a folder synced between the machines that flash a board and the ones that only talk to
+//!    it over USB), then in the ELF directory ([`cache_dir`], `~/.cache/ww/elf` on Linux), filled by [`add`] from
+//!    single ELFs or release archives;
 //! 3. the binaries under the cargo project's `target/` directory, the one with that build id.
 //!
 //! A device that reports no build id (firmware without the note) gets the newest binary under `target/`, with a
@@ -22,8 +24,51 @@ use std::process::Command;
 use std::time::SystemTime;
 
 /// Environment variable with extra directories (`:`-separated, `;` on Windows) holding `<build id>.elf` files,
-/// searched before the ELF directory.
+/// searched before [`config_dirs`] and the ELF directory.
 pub const ELF_PATH_VAR: &str = "WW_ELF_PATH";
+
+/// The config file read by [`config_dirs`], `~/.config/ww/config.toml` on Linux: shared by `cnt` and `ww`, like
+/// [`cache_dir`].
+pub fn config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("ww").join("config.toml"))
+}
+
+#[derive(serde::Deserialize, Default)]
+struct Config {
+    #[serde(default)]
+    elf: ElfConfig,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ElfConfig {
+    /// ```toml
+    /// [elf]
+    /// dirs = ["/home/roman/Sync/ww-elf"]
+    /// ```
+    #[serde(default)]
+    dirs: Vec<PathBuf>,
+}
+
+/// Extra directories for `<build id>.elf`, from the `[elf] dirs` entry of [`config_path`]: a persistent setting
+/// for a directory that isn't the machine-local [`cache_dir`], e.g. one kept in sync with other machines by
+/// Syncthing or similar, so every machine that runs `cnt`/`ww`/a WireWeaver host app finds the same ELFs without
+/// anyone exporting an environment variable. Missing file or bad TOML: empty, same as not configured.
+pub fn config_dirs() -> Vec<PathBuf> {
+    let Some(path) = config_path() else {
+        return vec![];
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return vec![];
+    };
+    parse_config_dirs(&content)
+}
+
+/// The `[elf] dirs` entry of a config file's content, empty on bad TOML.
+fn parse_config_dirs(content: &str) -> Vec<PathBuf> {
+    toml::from_str::<Config>(content)
+        .map(|c| c.elf.dirs)
+        .unwrap_or_default()
+}
 
 /// GNU build id of an ELF, `None` if it was linked without one.
 pub fn build_id(elf_bytes: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
@@ -90,7 +135,7 @@ pub fn cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|d| d.join("ww").join("elf"))
 }
 
-/// Directories searched for `<build id>.elf`: those in `WW_ELF_PATH`, then [`cache_dir`].
+/// Directories searched for `<build id>.elf`: those in `WW_ELF_PATH`, then [`config_dirs`], then [`cache_dir`].
 pub fn elf_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os(ELF_PATH_VAR)
         .map(|p| {
@@ -99,8 +144,16 @@ pub fn elf_dirs() -> Vec<PathBuf> {
                 .collect()
         })
         .unwrap_or_default();
+    dirs.extend(config_dirs());
     dirs.extend(cache_dir());
     dirs
+}
+
+/// Where [`add`] puts an ELF when the caller doesn't ask for a specific directory: the first of [`config_dirs`]
+/// if one is set, so a flash on any machine publishes straight into the shared directory everyone else already
+/// searches; [`cache_dir`] otherwise.
+pub fn default_write_dir() -> Option<PathBuf> {
+    config_dirs().into_iter().next().or_else(cache_dir)
 }
 
 /// `<build id>.elf` in one of `dirs`, if its build id really is `id`.
@@ -430,6 +483,24 @@ mod tests {
     use super::*;
 
     const FIXTURE: &[u8] = include_bytes!("../tests/fixtures/counters_fw.elf");
+
+    #[test]
+    fn config_dirs_from_toml() {
+        assert_eq!(
+            parse_config_dirs("[elf]\ndirs = [\"/a/b\", \"/c/d\"]\n"),
+            vec![PathBuf::from("/a/b"), PathBuf::from("/c/d")]
+        );
+    }
+
+    #[test]
+    fn config_dirs_missing_or_bad_is_empty() {
+        assert_eq!(parse_config_dirs(""), Vec::<PathBuf>::new());
+        assert_eq!(
+            parse_config_dirs("not valid toml {{"),
+            Vec::<PathBuf>::new()
+        );
+        assert_eq!(parse_config_dirs("[elf]\n"), Vec::<PathBuf>::new());
+    }
 
     fn note(kind: u32, name: &[u8], desc: &[u8]) -> Vec<u8> {
         let mut n = vec![];

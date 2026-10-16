@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-16
+
+### Added
+
+- `cnt_core::elf`: a config file (`~/.config/ww/config.toml` on Linux, `config_path`), `[elf] dirs` entry
+  (`config_dirs`) for directories searched for `<build id>.elf` in addition to `WW_ELF_PATH` and the ELF
+  directory, e.g. one kept in sync between machines (Syncthing or similar) so a board flashed on one machine is
+  found by `cnt`/`ww`/a WireWeaver host app on another without anyone exporting an environment variable.
+  `default_write_dir` picks the first configured directory over the ELF directory, so `add` (`cnt elf add`, and
+  `cnt run`'s own call below) publishes straight into the shared directory when one is configured.
+- `cnt run` (the cargo runner) now caches the ELF it just flashed by build id (`cnt_core::elf::add`), so
+  `counters`/`log` find it later without `--elf`, on this machine or (with a configured shared directory) another
+  one. A failure to cache (e.g. no cache directory) is a warning, not a reason to fail a flash that already
+  succeeded.
+
 ## [0.5.0] - 2026-10-15
 
 ### Added

@@ -13,7 +13,7 @@ use cnt_view::{Format, output, theme};
 use elf_cmd::ElfCommand;
 use logs::LogOptions;
 use probe::ProbeOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use target::ProbeSource;
 
@@ -218,6 +218,7 @@ pub fn process_cmd(cmd: Command, format: Format) -> anyhow::Result<()> {
             let mut session = probe.attach(&elf_path)?;
             // Runs the firmware just flashed, nothing to check
             run::flash_and_reset(&mut session, &elf_path, defmt.as_ref())?;
+            keep_elf(&elf_path);
             let core = session.core(0)?;
             let mut source = ProbeSource::new(core, &counters, defmt);
             if tui {
@@ -303,4 +304,17 @@ fn checked(
         *elf_path = found;
     }
     Ok(())
+}
+
+/// Store the ELF just flashed by its build id (`cnt_core::elf::add`), so `counters`/`log` can find it by build id
+/// later, on this machine or (if a shared directory is configured) another one, without `--elf`. The flash already
+/// succeeded, so a failure here (e.g. no cache directory) is a warning, not an error.
+fn keep_elf(elf_path: &Path) {
+    let Some(dir) = cnt_core::elf::default_write_dir() else {
+        return;
+    };
+    if let Err(e) = cnt_core::elf::add(elf_path, &dir) {
+        let warn = theme().warn;
+        eprintln!("⚠️ {warn}Could not cache the flashed ELF: {e}{warn:#}");
+    }
 }
