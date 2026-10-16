@@ -41,9 +41,11 @@ struct Config {
 
 #[derive(serde::Deserialize, Default)]
 struct ElfConfig {
+    /// A leading `~/` is the home directory, so the same line works on every machine regardless of its username.
+    ///
     /// ```toml
     /// [elf]
-    /// dirs = ["/home/roman/Sync/ww-elf"]
+    /// dirs = ["~/sync/ww-elf"]
     /// ```
     #[serde(default)]
     dirs: Vec<PathBuf>,
@@ -61,13 +63,24 @@ pub fn config_dirs() -> Vec<PathBuf> {
         return vec![];
     };
     parse_config_dirs(&content)
+        .into_iter()
+        .map(expand_home)
+        .collect()
 }
 
-/// The `[elf] dirs` entry of a config file's content, empty on bad TOML.
+/// The `[elf] dirs` entry of a config file's content, empty on bad TOML, `~` not yet expanded.
 fn parse_config_dirs(content: &str) -> Vec<PathBuf> {
     toml::from_str::<Config>(content)
         .map(|c| c.elf.dirs)
         .unwrap_or_default()
+}
+
+/// A leading `~` or `~/...` replaced with the home directory; any other path unchanged.
+fn expand_home(dir: PathBuf) -> PathBuf {
+    let Ok(rest) = dir.strip_prefix("~") else {
+        return dir;
+    };
+    dirs::home_dir().map(|home| home.join(rest)).unwrap_or(dir)
 }
 
 /// GNU build id of an ELF, `None` if it was linked without one.
@@ -500,6 +513,24 @@ mod tests {
             Vec::<PathBuf>::new()
         );
         assert_eq!(parse_config_dirs("[elf]\n"), Vec::<PathBuf>::new());
+    }
+
+    #[test]
+    fn home_is_expanded_only_as_a_leading_component() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(expand_home(PathBuf::from("~")), home);
+        assert_eq!(
+            expand_home(PathBuf::from("~/sync/ww-elf")),
+            home.join("sync/ww-elf")
+        );
+        assert_eq!(
+            expand_home(PathBuf::from("/already/absolute")),
+            PathBuf::from("/already/absolute")
+        );
+        assert_eq!(
+            expand_home(PathBuf::from("~other/sync")),
+            PathBuf::from("~other/sync")
+        );
     }
 
     fn note(kind: u32, name: &[u8], desc: &[u8]) -> Vec<u8> {
