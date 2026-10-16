@@ -3,7 +3,7 @@ resolver = "3"
 members = ["cnt", "cnt_cli", "cnt_core", "cnt_macro", "cnt_view"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Roman Isaikin <romix.lab@gmail.com>"]
@@ -13,7 +13,7 @@ repository = "https://github.com/romixlab/cnt"
 
 [workspace.dependencies]
 anyhow = "1.0"
-cnt_core = { path = "./cnt_core", version = "0.6.0" }
-cnt_view = { path = "./cnt_view", version = "0.6.0" }
+cnt_core = { path = "./cnt_core", version = "0.5.0" }
+cnt_view = { path = "./cnt_view", version = "0.5.0" }
 # Exact: the code cnt_macro generates refers to items of the matching cnt version
-cnt_macro = { path = "./cnt_macro", version = "=0.6.0" }
+cnt_macro = { path = "./cnt_macro", version = "=0.5.0" }
