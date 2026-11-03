@@ -18,3 +18,6 @@ changed and means nothing once builds are reproducible): a small `build.rs` with
 --format=%ct`, worktree-safe `rerun-if-changed` on the real git dir's `HEAD`/`index`, `unknown` without git;
 `cnt_cli/build.rs` is the model here). Firmware reports the same through `fw_info`. When touching a CLI that
 lacks it or still says `built`, change it.
+
+Beyond `--version`, CLI look and behaviour (help, completion, output, colour, errors and exit codes, progress,
+prompts): follow the CLI UX guide, `~/git/tpm/area/ops/cli-ux.md`; the rules above win where they are stricter.
