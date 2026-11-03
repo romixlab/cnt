@@ -20,4 +20,8 @@ changed and means nothing once builds are reproducible): a small `build.rs` with
 lacks it or still says `built`, change it.
 
 Beyond `--version`, CLI look and behaviour (help, completion, output, colour, errors and exit codes, progress,
-prompts): follow the CLI UX guide, `~/git/tpm/area/ops/cli-ux.md`; the rules above win where they are stricter.
+prompts): follow the CLI UX guide, `~/git/vhrd_cli/docs/ux-guide.md`
+(https://github.com/vhrdtech/vhrd_cli/blob/main/docs/ux-guide.md); the rules every UI shares are vhrd_egui's
+guide section 2, "rules for every UI"
+(https://github.com/vhrdtech/vhrd_egui/blob/main/docs/ux-guide.md#2-rules-for-every-ui). The rules above win
+where they are stricter.
