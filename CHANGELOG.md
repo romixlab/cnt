@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+- docs: internal references removed
+
 ## [0.5.2] - 2026-11-06
 
 ### Added

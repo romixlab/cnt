@@ -2,11 +2,11 @@
 
 ## Versions
 
-Landing bumps the version, not each work commit (tpm CLAUDE.md "Landing bumps the version"): branch commits put
-their CHANGELOG entries under `[Unreleased]`, and `tpm land` turns them into `## [x.y.z] - YYYY-MM-DD` with the
-manifest bump (all workspace crates share one version) in one `release: x.y.z` commit, so any build from main
-traces back. **A branch never touches the version** (manifests, `## [x.y.z]` headings, tags) — not a session's
-call. The bump follows Cargo's semver: before 1.0, minor means breaking, so 0.x gets patch for additive or
+Landing bumps the version, not each work commit: branch commits put their CHANGELOG entries under `[Unreleased]`,
+and landing turns them into `## [x.y.z] - YYYY-MM-DD` with the manifest bump (all workspace crates share one
+version) in one `release: x.y.z` commit, so any build from main traces back. **A branch never touches the
+version** (manifests, `## [x.y.z]` headings, tags) — not a session's call. The bump follows Cargo's semver:
+before 1.0, minor means breaking, so 0.x gets patch for additive or
 compatible changes and minor only for a breaking one; from 1.0, minor for Added/Deprecated, patch for fixes,
 major only when the owner says so. A breaking change is said in the entry itself (`**Breaking:** ...` under
 Changed or Removed), so the landing can tell.
@@ -20,7 +20,7 @@ changed and means nothing once builds are reproducible): a small `build.rs` with
 lacks it or still says `built`, change it.
 
 Beyond `--version`, CLI look and behaviour (help, completion, output, colour, errors and exit codes, progress,
-prompts): follow the CLI UX guide, `~/git/vhrd_cli/docs/ux-guide.md`
+prompts): follow the CLI UX guide
 (https://github.com/vhrdtech/vhrd_cli/blob/main/docs/ux-guide.md); the rules every UI shares are vhrd_egui's
 guide section 2, "rules for every UI"
 (https://github.com/vhrdtech/vhrd_egui/blob/main/docs/ux-guide.md#2-rules-for-every-ui). The rules above win
