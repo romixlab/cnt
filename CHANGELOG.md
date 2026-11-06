@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-06
+
 ### Added
 
 - `examples/b135_demo`: a demo firmware for the B135 board (STM32H725IG, embassy) that shows what `cnt tui` displays.

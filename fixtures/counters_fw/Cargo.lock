@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "cnt"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "cnt_macro",
 ]
 
 [[package]]
 name = "cnt_macro"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "proc-macro2",
  "quote",
