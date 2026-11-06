@@ -89,6 +89,11 @@ Library crates can count per instance, see [Instance counters](#instance-counter
   * The same counters can be read over WireWeaver instead of a probe: `ww counters` (the `ww_counters` API).
 
 <img src="https://github.com/romixlab/cnt/blob/main/assets/tui.gif?raw=true" alt="TUI demo">
+
+[`examples/b135_demo`](examples/b135_demo) is a firmware that shows the TUI at work on a B135 board (STM32H725IG):
+made-up traffic of a USB path, a CAN bus, an ADC and a control loop, as counters of each kind, in groups, with units
+and all five severities, a group the firmware clears, a counter in backup registers and defmt logs. `just demo`
+flashes it through the probe and opens the TUI.
   
 ## How to get counters data from fw itself
 

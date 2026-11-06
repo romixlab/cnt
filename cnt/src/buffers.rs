@@ -280,7 +280,8 @@ fn saturating_add_u64(words: &[AtomicU32], rhs: u64) {
 #[cfg(any(target_has_atomic = "32", test))]
 #[inline(always)]
 fn saturating_add_u32_atomic(counter: &AtomicU32, rhs: u32) {
-    // The closure never returns None, so this cannot fail
+    // The closure never returns None, so this cannot fail. `try_update` is newer than the MSRV (1.88)
+    #[allow(deprecated)]
     let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
         Some(v.saturating_add(rhs))
     });
@@ -311,6 +312,7 @@ fn saturating_add_u64_atomic(lo: &AtomicU32, hi: &AtomicU32, rhs: u64) {
     if inc_hi == 0 {
         return;
     }
+    #[allow(deprecated)] // `try_update` is newer than the MSRV (1.88)
     let Ok(old_hi) = hi.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |h| {
         Some(h.saturating_add(inc_hi))
     }) else {

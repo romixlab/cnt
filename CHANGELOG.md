@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `examples/b135_demo`: a demo firmware for the B135 board (STM32H725IG, embassy) that shows what `cnt tui` displays.
+  A made-up instrument tells a 36 s story: a USB transfer ramps up into megabytes, the CAN bus goes bus-off and
+  recovers while the control loop overruns, and a USB bus reset clears the `usb` instance counters. It has `u32` and
+  `u64` counters, groups, units (`B`, `µs`, `mAs`), all five severities, `cnt_if!`, a `bkp_cnt!` boot counter in
+  the RTC backup registers and defmt logs of its own crate only. 11 KiB of flash, 1.6 KiB of static RAM. `just demo`
+  flashes it and opens the TUI.
+- `justfile`: `test` (with `--changed`), `test-all` and `lint`, which also checks the demo firmware with clippy.
+
+### Fixed
+
+- `cnt`: builds without warnings on rustc 1.99, where `fetch_update` is deprecated: it stays, as `try_update` is newer
+  than the MSRV (1.88).
+
 ## [0.5.1] - 2026-10-16
 
 ### Added

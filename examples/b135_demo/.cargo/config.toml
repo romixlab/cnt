@@ -1,0 +1,15 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# `cargo run` flashes and shows the counters live, `cnt tui` attaches later
+runner = "cnt run --chip STM32H725IGKx --tui"
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x", "-C", "link-arg=-Tcnt.x", "-C", "link-arg=--build-id=sha1", "-C", "link-arg=--nmagic"]
+
+[env]
+# Only the demo's own messages: the log panel shows `src/main.rs:LINE`, never a path of a dependency
+DEFMT_LOG = "off,b135_demo=info"
+CNT_RAM_BUFFER_SIZE_WORDS = "32"
+CNT_BKP_BUFFER_SIZE_WORDS = "4"
+# RTC_BKP0R..3R, kept across resets
+CNT_BKP_MEMORY_REGION = "BKP_REGS"
