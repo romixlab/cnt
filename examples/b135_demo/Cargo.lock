@@ -116,14 +116,14 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "cnt"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "cnt_macro",
 ]
 
 [[package]]
 name = "cnt_macro"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "proc-macro2",
  "quote",
